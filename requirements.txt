@@ -1,0 +1,66 @@
+# Core ML libraries
+torch>=2.5.0
+transformers>=4.36.0
+accelerate>=0.25.0
+safetensors>=0.4.0
+peft>=0.6.0
+protobuf>=3.20.0
+
+# HuggingFace ecosystem
+huggingface-hub>=0.20.0
+datasets>=2.15.0
+tokenizers>=0.15.0
+
+# Numerical computing
+numpy>=1.26.0
+scipy>=1.11.0
+
+# Visualization
+matplotlib>=3.8.0
+seaborn>=0.13.0
+plotly>=5.18.0
+
+# Progress bars and utilities
+tqdm>=4.66.0
+rich>=13.7.0
+
+# Data handling
+pandas>=2.1.0
+pyarrow>=14.0.0
+datasets>=2.14.0
+
+# System and file handling
+psutil>=5.9.0
+py-cpuinfo>=9.0.0
+
+# Dependencias para el servidor compatible con Ollama
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+sentencepiece>=0.1.99
+protobuf>=3.20.0
+
+# Desarrollo/Testing
+pytest>=7.3.0
+black>=23.0.0
+tensorboard>=2.13.0
+
+# Utilidades
+psutil>=5.9.0
+py-cpuinfo>=9.0.0
+
+# Optional: For better performance (commented out problematic packages)
+ninja>=1.11.0  # Para compilación optimizada
+triton>=2.0.0  # Solo disponible en Linux y ciertas versiones de Python
+
+# Optional: For quantization experiments
+bitsandbytes>=0.41.0  # Puede tener problemas en Windows
+auto-gptq>=0.5.0  # Requiere configuración específica
+
+# Opcional: Para métodos de compresión avanzados
+tensorly>=0.8.0  # Para descomposición tensorial
+onnx>=1.14.0     # Para exportación ONNX
+onnxruntime>=1.15.0  # Para optimización ONNX
+
+# Opcional: para usar el cliente de prueba con librería ollama
+# ollama>=0.1.0
