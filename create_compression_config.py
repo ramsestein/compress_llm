@@ -81,9 +81,9 @@ class OptimizedCompressionConfigCreator:
     def _quick_profile_selection(self) -> str:
         """Selección rápida de perfil"""
         print("\n📐 Selecciona un perfil de compresión:")
-        print("\n[1] 🛡️  Conservative (15% compresión, 95%+ rendimiento)")
-        print("[2] ⚖️  Balanced (35% compresión, 90% rendimiento)")
-        print("[3] 🚀 Aggressive (60% compresión, 80% rendimiento)")
+        print("\n[1] 🛡️  Conservative (30% compresión, 95%+ rendimiento)")
+        print("[2] ⚖️  Balanced (50% compresión, 90% rendimiento)")
+        print("[3] 🚀 Aggressive (70% compresión, 80% rendimiento)")
         print("[4] 🔧 Custom (configuración manual)")
         
         while True:
