@@ -1,19 +1,13 @@
----
+"""Motor de compresión que aplica diferentes técnicas de compresión a modelos."""
 
-## 📄 **ARCHIVO 3: compression_engine.py**
-**Ubicación:** Raíz del proyecto
-**Descripción:** Motor principal de aplicación de compresión
+import logging
+from dataclasses import dataclass
+from typing import Dict, Any, Optional, Tuple, List
 
-```python
-"""
-Motor de compresión que aplica diferentes técnicas de compresión a modelos
-"""
+import numpy as np
 import torch
 import torch.nn as nn
-from typing import Dict, Any, Optional, Tuple, List
-import numpy as np
-from dataclasses import dataclass
-import logging
+import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
@@ -728,7 +722,3 @@ class MPOLinear(nn.Module):
         
         # Por ahora, retornar matriz aleatoria del tamaño correcto
         return torch.randn(self.out_features, self.in_features, device=self.cores[0].device)
-
-
-# Imports necesarios
-import torch.nn.functional as F
