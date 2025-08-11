@@ -1,10 +1,3 @@
----
-
-## 📄 **ARCHIVO 3: compression_engine.py**
-**Ubicación:** Raíz del proyecto
-**Descripción:** Motor principal de aplicación de compresión
-
-```python
 """
 Motor de compresión que aplica diferentes técnicas de compresión a modelos
 """
