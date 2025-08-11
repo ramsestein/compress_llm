@@ -734,4 +734,3 @@ class MPOLinear(nn.Module):
         
         # Por ahora, retornar matriz aleatoria del tamaño correcto
         return torch.randn(self.out_features, self.in_features, device=self.cores[0].device)
-
