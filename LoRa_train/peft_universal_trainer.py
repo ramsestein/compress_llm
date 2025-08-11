@@ -372,6 +372,8 @@ class UniversalPEFTTrainer:
             #Comentar si no soportado bf16 por CUDA
             bf16=torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
             gradient_checkpointing=self.config.gradient_checkpointing,
+            remove_unused_columns=False,
+            save_safetensors=False,
             report_to="none",
             run_name=run_name
         )
