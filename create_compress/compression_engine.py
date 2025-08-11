@@ -1,10 +1,17 @@
+import logging
+from dataclasses import dataclass
+from typing import Dict, Any, Optional, Tuple, List
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import torch
 import torch.nn as nn
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple, Optional
 
 from .compression_methods import apply_compression as _apply_compression
-
 
 @dataclass
 class CompressionResult:
