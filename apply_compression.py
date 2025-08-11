@@ -149,8 +149,12 @@ class ModelCompressor:
             config = AutoConfig.from_pretrained(self.model_path)
             model_type = config.model_type
             
-            # Cargar tokenizer
-            tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+            # Cargar tokenizer si existe
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+            except Exception:
+                tokenizer = None
+                logger.warning("Tokenizer no encontrado, continuando sin él")
             
             # Cargar modelo con configuración de memoria optimizada
             logger.info(f"🖥️ Dispositivo: {device}")
@@ -240,7 +244,8 @@ class ModelCompressor:
             # 5. Guardar modelo comprimido
             logger.info("\n💾 Guardando modelo comprimido...")
             model.save_pretrained(self.output_path)
-            tokenizer.save_pretrained(self.output_path)
+            if tokenizer is not None:
+                tokenizer.save_pretrained(self.output_path)
             
             # 6. Copiar archivos adicionales
             self._copy_additional_files()
