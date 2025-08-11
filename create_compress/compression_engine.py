@@ -1,10 +1,3 @@
----
-
-## 📄 **ARCHIVO 3: compression_engine.py**
-**Ubicación:** Raíz del proyecto
-**Descripción:** Motor principal de aplicación de compresión
-
-```python
 """
 Motor de compresión que aplica diferentes técnicas de compresión a modelos
 """
@@ -129,8 +122,8 @@ class CompressionEngine:
         
         # Cuantizar pesos
         scale, zero_point = self._calculate_quantization_params(module.weight.data, 8)
-        quantized.weight_scale = scale
-        quantized.weight_zero_point = zero_point
+        quantized.weight_scale.fill_(scale)
+        quantized.weight_zero_point.fill_(zero_point)
         quantized.weight_int = self._quantize_tensor(module.weight.data, scale, zero_point, 8)
         
         if module.bias is not None:
@@ -152,8 +145,8 @@ class CompressionEngine:
         
         # Proceso similar pero con 4 bits
         scale, zero_point = self._calculate_quantization_params(module.weight.data, 4)
-        quantized.weight_scale = scale
-        quantized.weight_zero_point = zero_point
+        quantized.weight_scale.fill_(scale)
+        quantized.weight_zero_point.fill_(zero_point)
         quantized.weight_int = self._quantize_tensor(module.weight.data, scale, zero_point, 4)
         
         if module.bias is not None:
@@ -393,13 +386,17 @@ class CompressionEngine:
         """Calcula parámetros de cuantización"""
         min_val = tensor.min().item()
         max_val = tensor.max().item()
-        
+
         qmin = 0
         qmax = 2**bits - 1
-        
+
+        # Evitar división por cero cuando todos los valores son iguales
+        if max_val == min_val:
+            return 1.0, 0
+
         scale = (max_val - min_val) / (qmax - qmin)
         zero_point = qmin - min_val / scale
-        
+
         return scale, int(zero_point)
     
     def _quantize_tensor(self, tensor: torch.Tensor, scale: float, zero_point: int, bits: int) -> torch.Tensor:
