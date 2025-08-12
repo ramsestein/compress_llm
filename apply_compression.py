@@ -223,9 +223,7 @@ class ModelCompressor:
                                 module, method_name, strength, layer_config
                             )
                             
-                            # Reemplazar módulo si fue modificado
-                            if compressed_module is not module:
-                                self._replace_module(model, name, compressed_module)
+                            self._replace_module(model, name, compressed_module)
                             
                             self.stats['methods_used'].add(method_name)
                     
@@ -240,9 +238,25 @@ class ModelCompressor:
             
             # Limpiar buffers no usados
             self._cleanup_model(model)
-            
-            # 5. Guardar modelo comprimido
+
             logger.info("\n💾 Guardando modelo comprimido...")
+            
+            # DEBUG: Verificar qué tipos de módulos hay
+            module_types = set()
+            for name, module in model.named_modules():
+                module_types.add(type(module).__name__)
+            logger.debug(f"Tipos de módulos en el modelo: {module_types}")
+            
+            # DEBUG: Verificar si hay módulos custom problemáticos
+            custom_modules = ['QuantizedLinear', 'TernaryLinear', 'PrunedLinear', 
+                              'TuckerLinear', 'SVDLinear', 'LoRALinear', 
+                              'MixedPrecisionLinear', 'BlockSparseLinear', 'MPOLinear']
+            found_custom = [m for m in module_types if m in custom_modules]
+            if found_custom:
+                logger.warning(f"⚠️ Módulos custom encontrados: {found_custom}")
+                logger.warning("Estos pueden causar problemas al guardar")
+                        
+            # 5. Guardar modelo comprimido
             model.save_pretrained(self.output_path)
             if tokenizer is not None:
                 tokenizer.save_pretrained(self.output_path)
@@ -349,42 +363,132 @@ class ModelCompressor:
         logger.info(f"{'='*60}")
     
     def _get_layer_type(self, name: str, module: nn.Module) -> str:
-        """Determina el tipo de una capa"""
+        """Determina el tipo de una capa de forma genérica"""
         name_lower = name.lower()
         module_type = type(module).__name__.lower()
         
-        # Embeddings
-        if 'embed' in name_lower or 'embed' in module_type:
+        # 1. EMBEDDINGS - Patrones universales
+        embedding_patterns = ['embed', 'emb', 'wte', 'wpe', 'position', 'token']
+        if any(pattern in name_lower for pattern in embedding_patterns):
+            return 'embedding'
+        if isinstance(module, nn.Embedding):
             return 'embedding'
         
-        # Attention
-        if any(x in name_lower for x in ['attention', 'attn', 'q_proj', 'k_proj', 'v_proj', 'o_proj']):
-            return 'attention'
-        
-        # FFN/MLP
-        if any(x in name_lower for x in ['mlp', 'ffn', 'fc1', 'fc2', 'gate_proj', 'up_proj', 'down_proj']):
-            return 'ffn'
-        
-        # Normalization
-        if any(x in name_lower for x in ['norm', 'layernorm', 'ln']):
+        # 2. NORMALIZATION - Por tipo de módulo
+        if isinstance(module, (nn.LayerNorm, nn.BatchNorm1d, nn.BatchNorm2d, nn.GroupNorm)):
+            return 'normalization'
+        norm_patterns = ['norm', 'ln', 'layernorm', 'batchnorm', 'groupnorm']
+        if any(pattern in name_lower for pattern in norm_patterns):
             return 'normalization'
         
-        # Output/LM Head
-        if any(x in name_lower for x in ['lm_head', 'output', 'classifier']):
+        # 3. OUTPUT/HEAD - Patrones comunes
+        output_patterns = ['head', 'output', 'classifier', 'lm_head', 'cls', 'prediction', 'logits', 'score']
+        if any(pattern in name_lower for pattern in output_patterns):
             return 'output'
+        
+        # 4. ATTENTION - Patrones multi-arquitectura
+        attention_patterns = [
+            'attention', 'attn', 'self_attn', 'cross_attn',
+            'q_proj', 'k_proj', 'v_proj', 'o_proj',  # Común en LLaMA, GPT
+            'query', 'key', 'value',  # BERT style
+            'c_attn', 'c_proj',  # GPT-2 style
+            'qkv', 'out_proj'  # Algunos modelos combinan QKV
+        ]
+        if any(pattern in name_lower for pattern in attention_patterns):
+            return 'attention'
+        
+        # Detectar por tipo de módulo (MultiheadAttention, etc.)
+        if 'attention' in module_type or 'multihead' in module_type:
+            return 'attention'
+        
+        # 5. FFN/MLP - Patrones universales
+        ffn_patterns = [
+            'mlp', 'ffn', 'feed_forward', 'feedforward',
+            'fc', 'dense',  # Fully connected
+            'w1', 'w2', 'w3',  # Algunos modelos usan esta nomenclatura
+            'gate_proj', 'up_proj', 'down_proj',  # LLaMA style
+            'c_fc', 'c_proj',  # GPT style
+            'intermediate', 'output.dense'  # BERT style
+        ]
+        if any(pattern in name_lower for pattern in ffn_patterns):
+            return 'ffn'
+        
+        # 6. ANÁLISIS ESTRUCTURAL para Linear layers
+        if isinstance(module, nn.Linear):
+            # Analizar dimensiones para inferir tipo
+            in_features = module.in_features
+            out_features = module.out_features
+            
+            # Si está dentro de un bloque transformer (heurística)
+            if '.h.' in name_lower or '.layer.' in name_lower or '.block.' in name_lower:
+                # Buscar pistas en el nombre del padre
+                parent_parts = name_lower.split('.')
+                for i, part in enumerate(parent_parts):
+                    # Si el Linear está después de algo que suena a attention
+                    if i > 0 and any(attn in parent_parts[i-1] for attn in ['attn', 'attention']):
+                        return 'attention'
+                    # Si está después de algo que suena a MLP/FFN
+                    if i > 0 and any(ffn in parent_parts[i-1] for ffn in ['mlp', 'ffn', 'feed']):
+                        return 'ffn'
+                
+                # Heurística por tamaño: FFN suele tener expansión 4x
+                if out_features > in_features * 3 or in_features > out_features * 3:
+                    return 'ffn'
+                
+                # Si las dimensiones son iguales, podría ser attention
+                if in_features == out_features:
+                    return 'attention'
+            
+            return 'linear'  # Mejor que 'other' para capas Linear
+        
+        # 7. CONVOLUCIONAL (por si acaso)
+        if isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+            return 'conv'
+        
+        # 8. DROPOUT y otros (no se comprimen)
+        if isinstance(module, (nn.Dropout, nn.Identity)):
+            return 'skip'  # Nueva categoría para capas que no se tocan
+        
+        # 9. Si no podemos determinar, intentar por estructura
+        # Verificar si tiene sub-módulos que den pistas
+        if not isinstance(module, (nn.ModuleList, nn.Sequential)):  # Solo para contenedores específicos
+            child_modules = list(module.named_children())
+            if child_modules and len(name.split('.')) < 10:  # Limitar profundidad de recursión
+                # Analizar hijos para inferir tipo del padre
+                child_types = set()
+                for child_name, child_module in child_modules[:3]:  # Solo primeros 3 hijos
+                    # Evitar recursión analizando solo el tipo del módulo hijo directamente
+                    if isinstance(child_module, nn.Linear):
+                        child_types.add('linear')
+                    elif isinstance(child_module, nn.LayerNorm):
+                        child_types.add('normalization')
+                    elif 'attention' in type(child_module).__name__.lower():
+                        child_types.add('attention')
+                    elif 'mlp' in type(child_module).__name__.lower():
+                        child_types.add('ffn')
+                
+                # Si todos los hijos son del mismo tipo, el padre probablemente es ese tipo
+                if len(child_types) == 1:
+                    return child_types.pop()
         
         return 'other'
     
     def _is_compressible_layer(self, module: nn.Module) -> bool:
         """Determina si una capa es comprimible"""
+        # Excluir tipos que nunca se comprimen
+        if isinstance(module, (nn.Dropout, nn.Identity)):
+            return False
+        
         # Solo comprimir capas con parámetros significativos
         if not hasattr(module, 'parameters'):
             return False
         
         num_params = sum(p.numel() for p in module.parameters())
         
-        # Umbral mínimo de parámetros
-        return num_params > 10000
+        # Umbral mínimo de parámetros (ajustable)
+        min_params = 1000  # Reducido para capas más pequeñas
+        
+        return num_params > min_params
     
     def _replace_module(self, model: nn.Module, module_name: str, new_module: nn.Module):
         """Reemplaza un módulo en el modelo"""

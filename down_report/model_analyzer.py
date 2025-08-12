@@ -14,6 +14,8 @@ import multiprocessing as mp
 from functools import lru_cache
 import warnings
 
+from .compression_strategies import CompressionStrategies
+
 # Suprimir warnings innecesarios
 warnings.filterwarnings('ignore', category=UserWarning)
 
@@ -302,7 +304,7 @@ class OptimizedModelAnalyzer:
         self._strategy_cache = {}
     
     def analyze(self, calibration_texts: Optional[List[str]] = None,
-               quick_mode: bool = False) -> Dict[str, Any]:
+               quick_mode: bool = False, use_case: str = 'all') -> Dict[str, Any]:
         """Analiza modelo y genera estrategias de compresión"""
         logger.info("🔍 Iniciando análisis optimizado del modelo...")
         
@@ -315,6 +317,15 @@ class OptimizedModelAnalyzer:
         
         # 3. Generar estrategias
         strategies = self._generate_strategies()
+
+        if use_case != 'all':
+            compression_strategies = CompressionStrategies(
+                self.layer_profiles, 
+                self.model_stats
+            )
+            # Añadir estrategias por caso de uso
+            for case in ['rag', 'ner', 'chatbot', 'agent']:
+                strategies[case] = compression_strategies.get_strategy(case)
         
         return strategies
     

@@ -105,17 +105,54 @@ class OptimizedCompressionConfigCreator:
         print("\n🔧 CONFIGURACIÓN PERSONALIZADA")
         print("="*40)
         
-        # Configurar cada tipo de capa
-        layer_types = self.config_manager.get_layer_types_list()
+        # Establecer global_settings para custom
+        self.config_manager.compression_config['global_settings'] = {
+            'profile': 'custom',
+            'name': 'Custom',
+            'description': 'Configuración personalizada',
+            'goal': 'custom',
+            'target_compression': 0.5,
+            'risk_level': 'medium'
+        }
         
-        for layer_type in layer_types:
+        # Tipos de capas estándar que siempre deben existir
+        standard_types = ['embedding', 'attention', 'ffn', 'linear', 'normalization', 
+                         'output', 'conv', 'other', 'skip']
+        
+        # Obtener tipos detectados
+        detected_types = self.config_manager.get_layer_types_list()
+        
+        # Combinar tipos detectados con estándar
+        all_types = list(set(detected_types + standard_types))
+        
+        for layer_type in all_types:
             layers = self.config_manager.get_layers_by_type(layer_type)
+            
+            # Si no hay capas de este tipo, configurar por defecto
             if not layers:
+                # Configuración por defecto para tipos no detectados
+                if layer_type in ['normalization', 'skip']:
+                    methods = [{'name': 'none', 'strength': 0.0}]
+                    ratio = 0.0
+                else:
+                    methods = [{'name': 'none', 'strength': 0.0}]
+                    ratio = 0.0
+                
+                self.config_manager.set_custom_layer_config(layer_type, methods, ratio)
                 continue
             
+            # Resto del código igual...
             print(f"\n📦 Tipo: {layer_type.upper()}")
             print(f"   Capas: {len(layers)}")
             print(f"   Tamaño: {sum(l['size_mb'] for l in layers):.1f} MB")
+
+            # Mostrar advertencia para tipos especiales
+            if layer_type in ['normalization', 'skip']:
+                print(f"   ⚠️ NOTA: Las capas de {layer_type} generalmente NO se comprimen")
+                print(f"   (Son críticas y tienen muy pocos parámetros)")
+            elif layer_type == 'output':
+                print(f"   ⚠️ NOTA: La capa de salida requiere cuidado especial")
+                print(f"   Se recomienda compresión mínima para mantener calidad")
             
             # Métodos recomendados
             methods = self._get_recommended_methods(layer_type)
@@ -141,6 +178,21 @@ class OptimizedCompressionConfigCreator:
             # Guardar configuración
             self.config_manager.set_custom_layer_config(layer_type, compression_methods, ratio)
     
+        total_original = 0
+        total_compressed = 0
+        
+        for layer_type, layers in self.config_manager.layer_types.items():
+            type_size = sum(l['size_mb'] for l in layers)
+            total_original += type_size
+            
+            config = self.config_manager.compression_config['layer_configs'].get(layer_type, {})
+            ratio = config.get('total_compression_ratio', 0)
+            total_compressed += type_size * (1 - ratio)
+        
+        if total_original > 0:
+            actual_compression = (total_original - total_compressed) / total_original
+            self.config_manager.compression_config['global_settings']['target_compression'] = actual_compression
+
     def _customize_configuration(self):
         """Personaliza una configuración base"""
         print("\n🎨 PERSONALIZACIÓN DE CONFIGURACIÓN")
@@ -240,35 +292,75 @@ class OptimizedCompressionConfigCreator:
     def _get_recommended_methods(self, layer_type: str) -> List[str]:
         """Obtiene métodos recomendados para un tipo de capa"""
         recommendations = {
-            'embedding': ['int8_quantization'],
-            'attention': ['tucker', 'int8_quantization', 'pruning'],
-            'ffn': ['pruning', 'int8_quantization', 'int4_quantization'],
-            'normalization': [],
-            'output': ['int8_quantization'],
-            'other': ['int8_quantization', 'pruning']
+            'embedding': ['int8_quantization', 'svd'],
+            'attention': ['head_pruning', 'attention_pruning', 'int8_quantization', 'low_rank_approximation'],
+            'ffn': ['magnitude_pruning', 'structured_pruning', 'int8_quantization', 'int4_quantization'],
+            'linear': ['magnitude_pruning', 'int8_quantization', 'low_rank_approximation'],
+            'normalization': [],  # No comprimir
+            'output': ['int8_quantization', 'magnitude_pruning'],
+            'conv': ['structured_pruning', 'int8_quantization', 'magnitude_pruning'],
+            'skip': [],  # No comprimir
+            'other': ['int8_quantization', 'magnitude_pruning']
         }
         return recommendations.get(layer_type, ['int8_quantization'])
     
     def _auto_configure_layer(self, layer_type: str, recommended: List[str]) -> Tuple[List[Dict], float]:
         """Configuración automática para un tipo de capa"""
-        # Configuraciones predefinidas por tipo
+        # Obtener el perfil actual para ajustar intensidad
+        profile = self.config_manager.compression_config.get('global_settings', {}).get('profile', 'balanced')
+        
+        # Multiplicadores según perfil
+        strength_multipliers = {
+            'conservative': 0.5,
+            'balanced': 1.0,
+            'aggressive': 1.5,
+            'custom': 1.0
+        }
+        multiplier = strength_multipliers.get(profile, 1.0)
+        
+        # Configuraciones base por tipo
         configs = {
-            'embedding': [{'name': 'int8_quantization', 'strength': 0.1}],
+            'embedding': [
+                {'name': 'int8_quantization', 'strength': 0.3 * multiplier}
+            ],
             'attention': [
-                {'name': 'tucker', 'strength': 0.15},
-                {'name': 'int8_quantization', 'strength': 0.1}
+                {'name': 'head_pruning', 'strength': 0.3 * multiplier},
+                {'name': 'int8_quantization', 'strength': 0.4 * multiplier}
             ],
             'ffn': [
-                {'name': 'pruning', 'strength': 0.2},
-                {'name': 'int8_quantization', 'strength': 0.15}
+                {'name': 'magnitude_pruning', 'strength': 0.4 * multiplier},
+                {'name': 'int8_quantization', 'strength': 0.5 * multiplier}
             ],
-            'normalization': [{'name': 'none', 'strength': 0.0}],
-            'output': [{'name': 'int8_quantization', 'strength': 0.1}],
-            'other': [{'name': 'int8_quantization', 'strength': 0.15}]
+            'linear': [
+                {'name': 'magnitude_pruning', 'strength': 0.3 * multiplier},
+                {'name': 'int8_quantization', 'strength': 0.4 * multiplier}
+            ],
+            'normalization': [
+                {'name': 'none', 'strength': 0.0}  # Nunca comprimir
+            ],
+            'output': [
+                {'name': 'int8_quantization', 'strength': 0.2 * multiplier}
+            ],
+            'conv': [
+                {'name': 'structured_pruning', 'strength': 0.3 * multiplier},
+                {'name': 'int8_quantization', 'strength': 0.4 * multiplier}
+            ],
+            'skip': [
+                {'name': 'none', 'strength': 0.0}  # Nunca comprimir
+            ],
+            'other': [
+                {'name': 'int8_quantization', 'strength': 0.3 * multiplier}
+            ]
         }
         
-        methods = configs.get(layer_type, [{'name': 'int8_quantization', 'strength': 0.15}])
+        methods = configs.get(layer_type, [{'name': 'int8_quantization', 'strength': 0.3 * multiplier}])
+        
+        # Ajustar strengths para no exceder 0.95
+        for method in methods:
+            method['strength'] = min(method['strength'], 0.95)
+        
         ratio = sum(m['strength'] for m in methods)
+        ratio = min(ratio, 0.95)  # Cap total en 95%
         
         return methods, ratio
     

@@ -401,7 +401,7 @@ Ejemplos:
         analyzer = OptimizedModelAnalyzer(model, model_stats)
         
         # Analizar
-        strategies = analyzer.analyze(calibration_texts, quick_mode=True)
+        strategies = analyzer.analyze(calibration_texts, quick_mode=True, use_case=args.use_case)
         
         # Generar reporte
         model_name_safe = Path(model_path).name if is_local else args.model.replace('/', '_')
@@ -447,11 +447,15 @@ Ejemplos:
         
         # Si se especificó un caso de uso, mostrar detalles
         if args.use_case != 'all':
-            strategy = strategies[args.use_case]
-            print(f"\n🎯 Optimización para {args.use_case.upper()}:")
-            print(f"   Compresión total: {strategy['expected_compression']*100:.1f}%")
-            print(f"   Tamaño final: {strategy.get('final_size_mb', 0):.1f} MB")
-            print(f"   Performance esperado: {strategy['expected_performance']*100:.0f}%")
+            if args.use_case in strategies:
+                strategy = strategies[args.use_case]
+                print(f"\n🎯 Optimización para {args.use_case.upper()}:")
+                print(f"   Compresión total: {strategy.get('expected_compression', 0)*100:.1f}%")
+                print(f"   Tamaño final: {strategy.get('final_size_mb', 0):.1f} MB")
+                print(f"   Performance esperado: {strategy.get('expected_performance', 0)*100:.0f}%")
+            else:
+                print(f"\n⚠️ Estrategia '{args.use_case}' no disponible.")
+                print(f"   Estrategias disponibles: {', '.join(strategies.keys())}")
         
         print(f"\n✅ Análisis completado!")
         print(f"📊 Informe guardado en: {report_path}")

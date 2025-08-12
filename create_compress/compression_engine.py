@@ -110,7 +110,6 @@ class CompressionEngine:
     def _module_size(self, module: nn.Module) -> int:
         """Calcula el tamaño en bytes de ``module``."""
         return sum(p.numel() * p.element_size() for p in module.parameters())
-            return module, result
     
     def _calculate_module_size(self, module: nn.Module) -> int:
         """Calcula el tamaño en bytes de un módulo"""

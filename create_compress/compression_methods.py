@@ -224,14 +224,14 @@ class PruningMethod(CompressionMethod):
         return strength  # Directamente el porcentaje podado
 
 class LowRankApproximation(CompressionMethod):
-    """Aproximación de bajo rango optimizada"""
+    """Aproximación de bajo rango optimizada - NO crea módulos custom"""
     
     def __init__(self):
         self._svd_cache = {}
     
     def compress(self, module: nn.Module, config: Dict[str, Any], 
                 device: torch.device) -> nn.Module:
-        """Aplica descomposición de bajo rango"""
+        """Aplica descomposición de bajo rango IN-PLACE"""
         if not isinstance(module, nn.Linear):
             return module
         
@@ -240,38 +240,36 @@ class LowRankApproximation(CompressionMethod):
         
         with torch.no_grad():
             weight = module.weight.data
+            original_dtype = weight.dtype
             
             # Calcular rango objetivo
             min_dim = min(weight.shape)
             target_rank = max(1, int(min_dim * rank_ratio))
             
-            # SVD truncado eficiente
             try:
-                # Para matrices grandes, usar randomized SVD
+                # Convertir a float32 si es necesario para SVD
+                if weight.dtype not in [torch.float32, torch.float64]:
+                    weight = weight.float()
+                
+                # SVD truncado eficiente
                 if weight.numel() > 1e6:
                     U, S, V = self._randomized_svd(weight, target_rank)
                 else:
                     U, S, V = torch.svd_lowrank(weight, q=target_rank)
                 
-                # Crear módulos de bajo rango
-                # W ≈ U @ S @ V.T = (U @ sqrt(S)) @ (sqrt(S) @ V.T)
-                S_sqrt = S.sqrt()
+                # Reconstruir peso aproximado
+                weight_approx = U @ torch.diag(S) @ V.T
                 
-                down_proj = nn.Linear(module.in_features, target_rank, bias=False)
-                up_proj = nn.Linear(target_rank, module.out_features, bias=module.bias is not None)
+                # Aplicar directamente al módulo original
+                module.weight.data = weight_approx.to(original_dtype)
                 
-                down_proj.weight.data = (V * S_sqrt).T
-                up_proj.weight.data = U * S_sqrt.unsqueeze(0)
-                
-                if module.bias is not None:
-                    up_proj.bias.data = module.bias.data
-                
-                # Crear módulo secuencial
-                return nn.Sequential(down_proj, up_proj)
+                logger.debug(f"SVD aplicado: {weight.shape} -> rango {target_rank}")
                 
             except Exception as e:
-                logger.warning(f"Error en SVD, usando módulo original: {e}")
-                return module
+                logger.warning(f"Error en SVD, manteniendo peso original: {e}")
+                # No hacer nada, mantener el peso original
+        
+        return module  # Devolver el mismo módulo modificado
     
     def _randomized_svd(self, matrix: torch.Tensor, rank: int) -> Tuple[torch.Tensor, ...]:
         """SVD aleatorizado para matrices grandes"""
@@ -290,10 +288,11 @@ class LowRankApproximation(CompressionMethod):
         
         # Proyectar y hacer SVD pequeño
         B = Q.T @ matrix
-        U_tilde, S, V = torch.svd(B)
+        U_tilde, S, Vh = torch.linalg.svd(B, full_matrices=False)
         U = Q @ U_tilde
         
-        return U[:, :rank], S[:rank], V[:, :rank]
+        # Retornar solo los primeros 'rank' componentes
+        return U[:, :rank], S[:rank], Vh[:rank, :]
     
     def estimate_compression(self, module: nn.Module, config: Dict[str, Any]) -> float:
         """Estima compresión por bajo rango"""
@@ -315,30 +314,61 @@ class AttentionPruning(CompressionMethod):
     
     def compress(self, module: nn.Module, config: Dict[str, Any], 
                 device: torch.device) -> nn.Module:
-        """Poda cabezas de atención menos importantes"""
+        """Poda cabezas de atención menos importantes IN-PLACE"""
         # Verificar si es un módulo de atención
         if not self._is_attention_module(module):
             return module
         
         strength = config.get('strength', 0.5)
         
-        # Implementación simplificada - en producción sería más compleja
-        # Por ahora, aplicar poda de magnitud a las proyecciones
-        pruning = PruningMethod(structured=True)
-        
-        # Podar proyecciones Q, K, V
+        # Buscar y modificar proyecciones de atención
         for name, child in module.named_children():
-            if any(proj in name for proj in ['q_proj', 'k_proj', 'v_proj', 'query', 'key', 'value']):
-                compressed = pruning.compress(child, config, device)
-                setattr(module, name, compressed)
+            if any(proj in name for proj in ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'c_attn', 'c_proj']):
+                if isinstance(child, nn.Linear):
+                    with torch.no_grad():
+                        weight = child.weight.data
+                        
+                        # Estimar número de cabezas (GPT-2 usa 12 para small)
+                        hidden_size = weight.shape[0]
+                        # Intentar detectar num_heads
+                        if hidden_size % 12 == 0:
+                            num_heads = 12
+                        elif hidden_size % 8 == 0:
+                            num_heads = 8
+                        elif hidden_size % 16 == 0:
+                            num_heads = 16
+                        else:
+                            num_heads = 4  # Fallback
+                        
+                        head_dim = hidden_size // num_heads
+                        
+                        # Calcular importancia por cabeza
+                        weight_reshaped = weight.reshape(num_heads, head_dim, -1)
+                        head_importance = weight_reshaped.abs().mean(dim=(1, 2))
+                        
+                        # Seleccionar cabezas a mantener
+                        num_keep = max(1, int(num_heads * (1 - strength)))
+                        _, keep_indices = torch.topk(head_importance, num_keep)
+                        keep_indices = keep_indices.sort()[0]
+                        
+                        # Crear máscara para las cabezas
+                        mask = torch.zeros_like(weight)
+                        for idx in keep_indices:
+                            start = idx * head_dim
+                            end = (idx + 1) * head_dim
+                            mask[start:end, :] = 1
+                        
+                        # Aplicar máscara directamente al peso
+                        child.weight.data *= mask
+                        
+                        logger.debug(f"Podadas {num_heads - num_keep}/{num_heads} cabezas en {name}")
         
-        return module
+        return module  # Devolver el mismo módulo modificado
     
     def _is_attention_module(self, module: nn.Module) -> bool:
         """Detecta si es un módulo de atención"""
-        # Heurística simple basada en nombres de submódulos
         child_names = [name for name, _ in module.named_children()]
-        attention_indicators = ['q_proj', 'k_proj', 'v_proj', 'query', 'key', 'value']
+        attention_indicators = ['q_proj', 'k_proj', 'v_proj', 'query', 'key', 'value', 'c_attn']
         return any(indicator in name for name in child_names for indicator in attention_indicators)
     
     def estimate_compression(self, module: nn.Module, config: Dict[str, Any]) -> float:
@@ -347,7 +377,7 @@ class AttentionPruning(CompressionMethod):
         return strength * 0.7  # Las cabezas de atención típicamente comprimen menos
 
 class MPOCompression(CompressionMethod):
-    """Compresión por Matrix Product Operators usando TensorLy"""
+    """Compresión por Matrix Product Operators usando TensorLy - NO crea módulos custom"""
     
     def __init__(self):
         if not TENSORLY_AVAILABLE:
@@ -355,7 +385,7 @@ class MPOCompression(CompressionMethod):
     
     def compress(self, module: nn.Module, config: Dict[str, Any], 
                 device: torch.device) -> nn.Module:
-        """Aplica descomposición MPO real usando TensorLy"""
+        """Aplica descomposición MPO IN-PLACE"""
         if not isinstance(module, nn.Linear):
             return module
         
@@ -364,34 +394,49 @@ class MPOCompression(CompressionMethod):
         with torch.no_grad():
             weight = module.weight.data
             original_shape = weight.shape
+            original_dtype = weight.dtype
             
             # Configurar rango MPO basado en strength
-            # Menor strength = mayor rango = menos compresión
             max_rank = min(original_shape[0], original_shape[1]) // 2
             mpo_rank = max(2, int(max_rank * (1 - strength)))
             
             try:
-                # Reshape para MPO (necesita tensor 4D)
+                # Convertir a float32 si es necesario
+                if weight.dtype not in [torch.float32, torch.float64]:
+                    weight = weight.float()
+                
                 # Factorizar dimensiones en pares
                 factors_out = self._factorize_dimension(original_shape[0])
                 factors_in = self._factorize_dimension(original_shape[1])
                 
-                # Reshape weight a formato 4D
+                # Reshape weight a formato 4D para MPO
                 weight_4d = weight.reshape(factors_out[0], factors_out[1], 
                                          factors_in[0], factors_in[1])
                 
-                # Aplicar descomposición Matrix Product State
-                # MPS es equivalente a MPO cuando se aplica a matrices
+                # Aplicar descomposición tensor_train
                 factors = tensor_train(weight_4d, rank=mpo_rank)
                 
-                # Crear capas comprimidas
-                return self._create_mpo_layers(factors, original_shape, module)
+                # Reconstruir tensor desde los factores
+                weight_reconstructed = tl.tt_to_tensor(factors)
+                
+                # Reshape de vuelta a 2D
+                weight_reconstructed = weight_reconstructed.reshape(original_shape)
+                
+                # Aplicar directamente al módulo original
+                module.weight.data = weight_reconstructed.to(original_dtype)
+                
+                logger.debug(f"MPO aplicado: {original_shape} con rango {mpo_rank}")
                 
             except Exception as e:
-                logger.warning(f"Error en MPO: {e}, usando SVD como fallback")
-                # Fallback a SVD
-                svd = LowRankApproximation()
-                return svd.compress(module, config, device)
+                logger.warning(f"Error en MPO, manteniendo peso original: {e}")
+                # Si falla, intentar con SVD como fallback
+                try:
+                    svd = LowRankApproximation()
+                    return svd.compress(module, config, device)
+                except:
+                    pass  # Mantener original si todo falla
+        
+        return module  # Devolver el mismo módulo modificado
     
     def _factorize_dimension(self, dim: int) -> Tuple[int, int]:
         """Factoriza una dimensión en dos factores cercanos"""
@@ -400,40 +445,6 @@ class MPOCompression(CompressionMethod):
             if dim % i == 0:
                 return (i, dim // i)
         return (1, dim)
-    
-    def _create_mpo_layers(self, factors: List[torch.Tensor], 
-                          original_shape: Tuple[int, int], 
-                          original_module: nn.Module) -> nn.Module:
-        """Crea estructura de capas para aproximar MPO"""
-        # Simplificación: usar dos capas lineales para aproximar
-        # En implementación completa sería más sofisticado
-        
-        # Combinar factores en dos matrices
-        first_factor = factors[0].reshape(-1, factors[0].shape[-1])
-        last_factor = factors[-1].reshape(factors[-1].shape[0], -1)
-        
-        if len(factors) > 2:
-            # Combinar factores intermedios
-            middle = torch.eye(first_factor.shape[1])
-            for f in factors[1:-1]:
-                middle = middle @ f.reshape(f.shape[0], -1)
-            first_factor = first_factor @ middle
-        
-        # Crear capas
-        intermediate_size = first_factor.shape[1]
-        
-        layer1 = nn.Linear(original_shape[1], intermediate_size, bias=False)
-        layer2 = nn.Linear(intermediate_size, original_shape[0], 
-                          bias=original_module.bias is not None)
-        
-        # Asignar pesos
-        layer1.weight.data = first_factor.T
-        layer2.weight.data = last_factor
-        
-        if original_module.bias is not None:
-            layer2.bias.data = original_module.bias.data
-        
-        return nn.Sequential(layer1, layer2)
     
     def estimate_compression(self, module: nn.Module, config: Dict[str, Any]) -> float:
         """Estima compresión MPO"""
@@ -445,7 +456,7 @@ class MPOCompression(CompressionMethod):
         return strength * 0.8
 
 class TuckerDecomposition(CompressionMethod):
-    """Descomposición Tucker real usando TensorLy"""
+    """Descomposición Tucker real usando TensorLy - NO crea módulos custom"""
     
     def __init__(self):
         if not TENSORLY_AVAILABLE:
@@ -453,12 +464,12 @@ class TuckerDecomposition(CompressionMethod):
     
     def compress(self, module: nn.Module, config: Dict[str, Any], 
                 device: torch.device) -> nn.Module:
-        """Aplica descomposición Tucker"""
+        """Aplica descomposición Tucker IN-PLACE"""
         if not isinstance(module, nn.Linear):
             return module
         
         if not TENSORLY_AVAILABLE:
-            # Fallback a SVD
+            # Fallback a SVD si no hay TensorLy
             svd = LowRankApproximation()
             return svd.compress(module, config, device)
         
@@ -466,8 +477,14 @@ class TuckerDecomposition(CompressionMethod):
         
         with torch.no_grad():
             weight = module.weight.data
+            original_shape = weight.shape
+            original_dtype = weight.dtype
             
             try:
+                # Convertir a float32 si es necesario
+                if weight.dtype not in [torch.float32, torch.float64]:
+                    weight = weight.float()
+                
                 # Tucker decomposition requiere tensor 3D o más
                 # Para matriz 2D, agregamos dimensión dummy
                 weight_3d = weight.unsqueeze(0)
@@ -484,18 +501,22 @@ class TuckerDecomposition(CompressionMethod):
                 from tensorly.decomposition import tucker
                 core, factors = tucker(weight_3d, rank=ranks)
                 
-                # Reconstruir aproximación
+                # Reconstruir tensor
                 weight_approx = tl.tucker_to_tensor((core, factors))
-                weight_approx = weight_approx.squeeze(0)
+                weight_approx = weight_approx.squeeze(0)  # Quitar dimensión dummy
                 
-                # Actualizar peso del módulo
-                module.weight.data = weight_approx
+                # Aplicar directamente al módulo original
+                module.weight.data = weight_approx.to(original_dtype)
                 
-                return module
+                logger.debug(f"Tucker aplicado: {original_shape} con ranks {ranks[1:]}")
                 
             except Exception as e:
-                logger.warning(f"Error en Tucker: {e}, usando módulo original")
-                return module
+                logger.warning(f"Error en Tucker, usando SVD como fallback: {e}")
+                # Fallback a SVD
+                svd = LowRankApproximation()
+                return svd.compress(module, config, device)
+        
+        return module  # Devolver el mismo módulo modificado
     
     def estimate_compression(self, module: nn.Module, config: Dict[str, Any]) -> float:
         """Estima compresión Tucker"""
@@ -513,32 +534,74 @@ class TuckerDecomposition(CompressionMethod):
         return 1 - (tucker_params / original_params)
 
 class ExpertPruning(CompressionMethod):
-    """Poda de expertos para modelos Mixture of Experts (MoE)"""
+    """Poda de expertos para modelos Mixture of Experts (MoE) - NO crea módulos custom"""
     
     def compress(self, module: nn.Module, config: Dict[str, Any], 
                 device: torch.device) -> nn.Module:
-        """Aplica poda de expertos si es un modelo MoE"""
+        """Aplica poda de expertos IN-PLACE si es un modelo MoE"""
         
         # Detectar si es un módulo MoE
         if not self._is_moe_module(module):
-            logger.info("Expert pruning: módulo no es MoE, retornando sin cambios")
+            logger.debug("Expert pruning: módulo no es MoE, retornando sin cambios")
             return module
         
         strength = config.get('strength', 0.5)
         
-        # Buscar componentes de expertos
-        if hasattr(module, 'experts') or hasattr(module, 'expert_weights'):
-            return self._prune_moe_experts(module, strength)
+        # Buscar y modificar componentes de expertos
+        if hasattr(module, 'experts') and isinstance(module.experts, nn.ModuleList):
+            num_experts = len(module.experts)
+            num_to_keep = max(1, int(num_experts * (1 - strength)))
+            
+            # Calcular importancia de cada experto
+            expert_importance = []
+            for i, expert in enumerate(module.experts):
+                # Calcular importancia como norma total de pesos
+                importance = 0
+                for p in expert.parameters():
+                    importance += p.abs().mean().item()
+                expert_importance.append((i, importance))
+            
+            # Ordenar por importancia y seleccionar los que mantener
+            expert_importance.sort(key=lambda x: x[1], reverse=True)
+            keep_indices = set([idx for idx, _ in expert_importance[:num_to_keep]])
+            
+            # Poner a cero los expertos no seleccionados
+            with torch.no_grad():
+                for i, expert in enumerate(module.experts):
+                    if i not in keep_indices:
+                        # Poner todos los parámetros del experto a cero
+                        for param in expert.parameters():
+                            param.data.zero_()
+                        logger.debug(f"Experto {i} eliminado (puesto a cero)")
+            
+            # Si hay un gate/router, ajustar sus pesos también
+            if hasattr(module, 'gate') and hasattr(module.gate, 'weight'):
+                with torch.no_grad():
+                    # Poner a cero las salidas correspondientes a expertos eliminados
+                    for i in range(num_experts):
+                        if i not in keep_indices:
+                            if i < module.gate.weight.shape[0]:
+                                module.gate.weight.data[i].zero_()
+                                if module.gate.bias is not None and i < module.gate.bias.shape[0]:
+                                    module.gate.bias.data[i] = -float('inf')  # Desactivar efectivamente
+            
+            logger.info(f"Poda de expertos: {num_experts - num_to_keep}/{num_experts} expertos eliminados")
         
-        # Si tiene estructura diferente, buscar recursivamente
-        for name, child in module.named_children():
-            if 'expert' in name.lower() or 'moe' in name.lower():
-                # Aplicar poda estructurada a expertos
-                pruning = PruningMethod(structured=True)
-                compressed = pruning.compress(child, config, device)
-                setattr(module, name, compressed)
+        # Buscar recursivamente en submódulos
+        else:
+            for name, child in module.named_children():
+                if 'expert' in name.lower() or 'moe' in name.lower():
+                    # Aplicar poda estructurada a expertos individuales
+                    with torch.no_grad():
+                        if hasattr(child, 'weight'):
+                            # Aplicar poda por magnitud al experto
+                            weight = child.weight.data
+                            threshold = torch.quantile(weight.abs().flatten(), strength)
+                            mask = weight.abs() > threshold
+                            child.weight.data *= mask
+                            logger.debug(f"Poda aplicada a experto: {name}")
         
-        return module
+        return module  # Devolver el mismo módulo modificado
     
     def _is_moe_module(self, module: nn.Module) -> bool:
         """Detecta si es un módulo MoE"""
@@ -562,46 +625,6 @@ class ExpertPruning(CompressionMethod):
         
         return False
     
-    def _prune_moe_experts(self, module: nn.Module, strength: float) -> nn.Module:
-        """Poda expertos menos utilizados en MoE"""
-        
-        # Si tiene lista de expertos
-        if hasattr(module, 'experts'):
-            num_experts = len(module.experts)
-            num_to_keep = max(1, int(num_experts * (1 - strength)))
-            
-            # Sin estadísticas de uso, usar poda basada en norma de pesos
-            expert_importance = []
-            for i, expert in enumerate(module.experts):
-                # Calcular importancia como norma total de pesos
-                importance = sum(p.abs().mean().item() for p in expert.parameters())
-                expert_importance.append((i, importance))
-            
-            # Ordenar por importancia y mantener los top-k
-            expert_importance.sort(key=lambda x: x[1], reverse=True)
-            keep_indices = [idx for idx, _ in expert_importance[:num_to_keep]]
-            
-            # Crear nueva lista de expertos
-            new_experts = nn.ModuleList([module.experts[i] for i in keep_indices])
-            module.experts = new_experts
-            
-            # Ajustar router/gate si existe
-            if hasattr(module, 'gate') and hasattr(module.gate, 'weight'):
-                # Reducir dimensión de salida del gate
-                old_gate = module.gate
-                new_gate = nn.Linear(
-                    old_gate.in_features,
-                    num_to_keep,
-                    bias=old_gate.bias is not None
-                )
-                # Copiar pesos correspondientes
-                new_gate.weight.data = old_gate.weight.data[keep_indices]
-                if old_gate.bias is not None:
-                    new_gate.bias.data = old_gate.bias.data[keep_indices]
-                module.gate = new_gate
-        
-        return module
-    
     def estimate_compression(self, module: nn.Module, config: Dict[str, Any]) -> float:
         """Estima compresión de expertos"""
         if not self._is_moe_module(module):
@@ -611,14 +634,13 @@ class ExpertPruning(CompressionMethod):
         # La poda de expertos es muy efectiva
         return strength * 0.95
 
-# Clases adicionales que permanecen igual...
 class SVDDecomposition(CompressionMethod):
-    """Descomposición SVD explícita"""
+    """Descomposición SVD explícita - NO crea módulos custom"""
     
     def compress(self, module: nn.Module, config: Dict[str, Any], 
                 device: torch.device) -> nn.Module:
-        """Aplica descomposición SVD"""
-        # Usar LowRankApproximation que ya implementa SVD
+        """Aplica descomposición SVD IN-PLACE"""
+        # Usar LowRankApproximation que ya implementa SVD correctamente
         svd = LowRankApproximation()
         return svd.compress(module, config, device)
     
@@ -628,51 +650,63 @@ class SVDDecomposition(CompressionMethod):
         return svd.estimate_compression(module, config)
 
 class MixedPrecisionMethod(CompressionMethod):
-    """Precisión mixta adaptativa"""
+    """Precisión mixta adaptativa - NO crea módulos custom"""
     
     def compress(self, module: nn.Module, config: Dict[str, Any], 
                 device: torch.device) -> nn.Module:
-        """Aplica precisión mixta"""
+        """Aplica precisión mixta IN-PLACE"""
         if not hasattr(module, 'weight'):
             return module
         
         strength = config.get('strength', 0.5)
         
-        # Implementación simplificada: usar cuantización adaptativa
         with torch.no_grad():
             weight = module.weight.data
+            original_dtype = weight.dtype
+            
+            # Calcular importancia de cada peso
             importance = weight.abs()
             
             # Dividir pesos en regiones por importancia
             threshold_high = torch.quantile(importance.flatten(), 1 - strength * 0.3)
             threshold_low = torch.quantile(importance.flatten(), strength * 0.5)
             
-            # Aplicar diferentes precisiones
-            mask_high = importance > threshold_high
-            mask_low = importance < threshold_low
-            mask_medium = ~mask_high & ~mask_low
+            # Crear máscaras para diferentes precisiones
+            mask_high = importance > threshold_high  # Alta precisión (sin cambios)
+            mask_low = importance < threshold_low    # Baja precisión (más cuantización)
+            mask_medium = ~mask_high & ~mask_low     # Precisión media
             
-            # Por simplicidad, simular con cuantización diferencial
+            # Aplicar diferentes niveles de cuantización
             weight_mixed = weight.clone()
             
-            # Aplicar cuantización solo a regiones de menor importancia
-            if mask_medium.any():
-                quant8 = QuantizationMethod(bits=8)
-                module_temp = type(module)(module.in_features, module.out_features)
-                module_temp.weight.data = weight * mask_medium.float()
-                module_temp = quant8.compress(module_temp, {'strength': 0.8}, device)
-                weight_mixed[mask_medium] = module_temp.weight.data[mask_medium]
-            
+            # Región de baja importancia: cuantización agresiva (simular INT4)
             if mask_low.any():
-                quant4 = QuantizationMethod(bits=4)
-                module_temp = type(module)(module.in_features, module.out_features)
-                module_temp.weight.data = weight * mask_low.float()
-                module_temp = quant4.compress(module_temp, {'strength': 1.0}, device)
-                weight_mixed[mask_low] = module_temp.weight.data[mask_low]
+                low_weights = weight[mask_low]
+                # Cuantizar a 4 bits
+                scale = (low_weights.max() - low_weights.min()) / 15  # 2^4 - 1 = 15
+                if scale > 0:
+                    quantized = torch.round(low_weights / scale) * scale
+                    weight_mixed[mask_low] = quantized
             
-            module.weight.data = weight_mixed
+            # Región media: cuantización moderada (simular INT8)
+            if mask_medium.any():
+                medium_weights = weight[mask_medium]
+                # Cuantizar a 8 bits
+                scale = (medium_weights.max() - medium_weights.min()) / 255  # 2^8 - 1 = 255
+                if scale > 0:
+                    quantized = torch.round(medium_weights / scale) * scale
+                    weight_mixed[mask_medium] = quantized
+            
+            # Región alta: mantener precisión original (mask_high no se toca)
+            
+            # Aplicar directamente al módulo
+            module.weight.data = weight_mixed.to(original_dtype)
+            
+            logger.debug(f"Precisión mixta aplicada: {(mask_high.sum()/weight.numel()*100):.1f}% alta, "
+                        f"{(mask_medium.sum()/weight.numel()*100):.1f}% media, "
+                        f"{(mask_low.sum()/weight.numel()*100):.1f}% baja")
         
-        return module
+        return module  # Devolver el mismo módulo modificado
     
     def estimate_compression(self, module: nn.Module, config: Dict[str, Any]) -> float:
         """Estima compresión por precisión mixta"""
@@ -683,18 +717,18 @@ class MixedPrecisionMethod(CompressionMethod):
         low_precision_ratio = strength * 0.2
         
         # Calcular compresión promedio ponderada
-        compression = (high_precision_ratio * 0 +  # Sin compresión
-                      medium_precision_ratio * 0.5 +  # 50% compresión (INT8)
-                      low_precision_ratio * 0.75)     # 75% compresión (INT4)
+        compression = (high_precision_ratio * 0 +      # Sin compresión
+                      medium_precision_ratio * 0.5 +   # 50% compresión (INT8)
+                      low_precision_ratio * 0.75)      # 75% compresión (INT4)
         
         return compression
 
 class BlockSparseMethod(CompressionMethod):
-    """Sparsidad por bloques"""
+    """Sparsidad por bloques - NO crea módulos custom"""
     
     def compress(self, module: nn.Module, config: Dict[str, Any], 
                 device: torch.device) -> nn.Module:
-        """Aplica sparsidad por bloques"""
+        """Aplica sparsidad por bloques IN-PLACE"""
         if not hasattr(module, 'weight'):
             return module
         
@@ -703,12 +737,20 @@ class BlockSparseMethod(CompressionMethod):
         
         with torch.no_grad():
             weight = module.weight.data
+            original_dtype = weight.dtype
+            
+            # Convertir a float32 si es necesario para cálculos
+            if weight.dtype not in [torch.float32, torch.float64]:
+                weight_float = weight.float()
+            else:
+                weight_float = weight
             
             # Dividir en bloques y calcular importancia
             h, w = weight.shape
             h_blocks = (h + block_size - 1) // block_size
             w_blocks = (w + block_size - 1) // block_size
             
+            # Calcular importancia por bloque
             block_importance = torch.zeros(h_blocks, w_blocks, device=weight.device)
             
             for i in range(h_blocks):
@@ -718,13 +760,19 @@ class BlockSparseMethod(CompressionMethod):
                     w_start = j * block_size
                     w_end = min((j + 1) * block_size, w)
                     
-                    block = weight[h_start:h_end, w_start:w_end]
+                    block = weight_float[h_start:h_end, w_start:w_end]
                     block_importance[i, j] = block.abs().mean()
             
             # Seleccionar bloques a mantener
             threshold = torch.quantile(block_importance.flatten(), strength)
             
+            # Crear máscara de peso completo
+            mask = torch.ones_like(weight, dtype=torch.bool)
+            
             # Aplicar máscara por bloques
+            blocks_zeroed = 0
+            total_blocks = h_blocks * w_blocks
+            
             for i in range(h_blocks):
                 for j in range(w_blocks):
                     if block_importance[i, j] <= threshold:
@@ -733,11 +781,16 @@ class BlockSparseMethod(CompressionMethod):
                         w_start = j * block_size
                         w_end = min((j + 1) * block_size, w)
                         
-                        weight[h_start:h_end, w_start:w_end] = 0
+                        mask[h_start:h_end, w_start:w_end] = False
+                        blocks_zeroed += 1
             
-            module.weight.data = weight
+            # Aplicar máscara directamente al peso
+            module.weight.data = weight * mask.to(original_dtype)
+            
+            logger.debug(f"Sparsidad por bloques aplicada: {blocks_zeroed}/{total_blocks} bloques "
+                        f"({blocks_zeroed/total_blocks*100:.1f}%) eliminados, tamaño de bloque: {block_size}")
         
-        return module
+        return module  # Devolver el mismo módulo modificado
     
     def estimate_compression(self, module: nn.Module, config: Dict[str, Any]) -> float:
         """Estima compresión por bloques"""
