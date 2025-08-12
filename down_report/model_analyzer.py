@@ -364,9 +364,11 @@ class OptimizedModelAnalyzer:
     
     def _should_analyze_layer(self, name: str, module: nn.Module) -> bool:
         """Determina si una capa debe ser analizada"""
-        # Solo analizar capas con parámetros significativos
+        # Usar el mismo umbral que apply_compression para evitar
+        # discrepancias entre la configuración generada y las capas
+        # que luego serán procesadas durante la compresión.
         param_count = sum(p.numel() for p in module.parameters(recurse=False))
-        return param_count > 10000  # Umbral: 10K parámetros
+        return param_count > 1000  # Coincide con _is_compressible_layer
     
     def _compute_layer_metrics(self):
         """Calcula métricas de importancia para las capas"""
