@@ -113,13 +113,10 @@ class ModelCompressor:
         layer_configs = self.compression_config.get('layer_configs', {})
         if layer_type in layer_configs:
             return layer_configs[layer_type]
-        
-        # Default: sin compresión
-        logger.warning(f"⚠️ No hay configuración para tipo '{layer_type}', preservando: {layer_name}")
-        return {
-            'methods': [{'name': 'none', 'strength': 0.0}],
-            'total_compression_ratio': 0.0
-        }
+        # Si llegamos aquí, la configuración está incompleta
+        raise KeyError(
+            f"No hay configuración para el tipo de capa '{layer_type}' (capa: {layer_name})"
+        )
     
     def compress_model(self):
         """Ejecuta la compresión del modelo"""
@@ -240,26 +237,18 @@ class ModelCompressor:
             self._cleanup_model(model)
 
             logger.info("\n💾 Guardando modelo comprimido...")
-            
-            # DEBUG: Verificar qué tipos de módulos hay
-            module_types = set()
-            for name, module in model.named_modules():
-                module_types.add(type(module).__name__)
-            logger.debug(f"Tipos de módulos en el modelo: {module_types}")
-            
-            # DEBUG: Verificar si hay módulos custom problemáticos
-            custom_modules = ['QuantizedLinear', 'TernaryLinear', 'PrunedLinear', 
-                              'TuckerLinear', 'SVDLinear', 'LoRALinear', 
-                              'MixedPrecisionLinear', 'BlockSparseLinear', 'MPOLinear']
-            found_custom = [m for m in module_types if m in custom_modules]
-            if found_custom:
-                logger.warning(f"⚠️ Módulos custom encontrados: {found_custom}")
-                logger.warning("Estos pueden causar problemas al guardar")
-                        
             # 5. Guardar modelo comprimido
-            model.save_pretrained(self.output_path)
-            if tokenizer is not None:
-                tokenizer.save_pretrained(self.output_path)
+            try:
+                model.save_pretrained(self.output_path)
+                if tokenizer is not None:
+                    tokenizer.save_pretrained(self.output_path)
+            except RecursionError:
+                import sys
+                logger.error("RecursionError al guardar, incrementando límite y reintentando")
+                sys.setrecursionlimit(sys.getrecursionlimit() * 2)
+                model.save_pretrained(self.output_path)
+                if tokenizer is not None:
+                    tokenizer.save_pretrained(self.output_path)
             
             # 6. Copiar archivos adicionales
             self._copy_additional_files()

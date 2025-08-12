@@ -11,7 +11,10 @@ import torch.nn as nn
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple, Optional
 
-from .compression_methods import apply_compression as _apply_compression
+from .compression_methods import (
+    apply_compression as _apply_compression,
+    get_available_methods,
+)
 
 @dataclass
 class CompressionResult:
@@ -60,8 +63,21 @@ class CompressionEngine:
             Configuración adicional; sólo se utiliza la clave ``params`` si
             está presente.
         """
+        # Atajos para métodos implementados directamente en esta clase que
+        # retornan módulos personalizados (por ejemplo, cuantización int8 que
+        # produce ``QuantizedLinear``).  Para otros métodos se delega al
+        # módulo ``compression_methods``.
+        if method_name == "int8_quantization":
+            return self._apply_int8_quantization(module, strength, layer_config)
+        if method_name == "int4_quantization":
+            return self._apply_int4_quantization(module, strength, layer_config)
+        if method_name == "int2_quantization":
+            return self._apply_int2_quantization(module, strength, layer_config)
+        if method_name in {"magnitude_pruning", "structured_pruning", "pruning"}:
+            return self._apply_pruning(module, strength, layer_config)
+
         method_config = {"name": method_name, "strength": strength}
-        if "params" in layer_config and isinstance(layer_config["params"], dict):
+        if "params" in layer_config and isinstance(layer_config.get("params"), dict):
             method_config.update(layer_config["params"])
         return _apply_compression(module, method_config, self.device)
 
@@ -74,23 +90,32 @@ class CompressionEngine:
         simples de compresión.
         """
         original_size = self._module_size(module)
-        methods = layer_config.get("methods", [])
+
+        # Permitir tanto configuraciones con lista de métodos como un único
+        # método especificado directamente con claves 'name' y 'strength'.
+        methods = layer_config.get("methods")
+        if not methods and "name" in layer_config:
+            methods = [layer_config]
+        if not methods:
+            methods = [{"name": "none", "strength": 0.0}]
+
+        available_methods = get_available_methods()
+        used_names: List[str] = []
 
         try:
             for method in methods:
-                module = self.apply_method(
-                    module,
-                    method.get("name", "none"),
-                    method.get("strength", 0.0),
-                    layer_config,
-                )
+                name = method.get("name", "none")
+                strength = method.get("strength", 0.0)
+                module = self.apply_method(module, name, strength, layer_config)
+                used_names.append(name if name in available_methods else "none")
+
             compressed_size = self._module_size(module)
             ratio = 1 - (compressed_size / original_size) if original_size else 0.0
             return module, CompressionResult(
                 original_size=original_size,
                 compressed_size=compressed_size,
                 compression_ratio=ratio,
-                method_used=",".join(m.get("name", "none") for m in methods),
+                method_used=",".join(used_names),
                 success=True,
             )
         except Exception as exc:  # pragma: no cover - logging
@@ -98,7 +123,7 @@ class CompressionEngine:
                 original_size=original_size,
                 compressed_size=original_size,
                 compression_ratio=0.0,
-                method_used=",".join(m.get("name", "none") for m in methods),
+                method_used=",".join(used_names),
                 success=False,
                 error=str(exc),
             )

@@ -222,8 +222,22 @@ class CompressionConfigManager:
         print(f"\n✅ Aplicando perfil: {profile['description']}")
         
         self.compression_config['global_settings'] = profile
-        self.compression_config['layer_configs'] = profile.get('layer_configs', {})
-        
+
+        # Copiar config de capas del perfil seleccionado
+        layer_configs = profile.get('layer_configs', {}).copy()
+
+        # Asegurar que todos los tipos detectados tengan al menos una
+        # configuración "sin compresión" para evitar advertencias durante
+        # la aplicación de la compresión.
+        for layer_type in self.layer_types.keys():
+            if layer_type not in layer_configs:
+                layer_configs[layer_type] = {
+                    'methods': [{'name': 'none', 'strength': 0.0}],
+                    'total_compression_ratio': 0.0
+                }
+
+        self.compression_config['layer_configs'] = layer_configs
+
         # Invalidar cache de resumen
         self._summary_cache = None
     
