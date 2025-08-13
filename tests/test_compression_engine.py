@@ -1,8 +1,14 @@
 import torch
+import os
+import sys
 import torch.nn as nn
 import pytest
 
+# Asegurar que el paquete del proyecto esté en el path de importación
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from create_compress.compression_engine import CompressionEngine, QuantizedLinear
+from create_compress.compression_methods import LowRankApproximation
 
 
 def test_calculate_quantization_params_constant_tensor():
@@ -39,3 +45,12 @@ def test_compress_layer_int8_quantization():
     assert isinstance(compressed, QuantizedLinear)
     assert result.success
     assert result.compression_ratio > 0
+
+
+def test_randomized_svd_returns_correct_shapes():
+    method = LowRankApproximation()
+    weight = torch.randn(50, 30)
+    U, S, V = method._randomized_svd(weight, rank=10)
+    assert U.shape == (50, 10)
+    assert S.shape == (10,)
+    assert V.shape == (30, 10)

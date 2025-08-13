@@ -263,7 +263,9 @@ class ModelCompressor:
             else:
                 # Si después de varios intentos sigue fallando, propagar el
                 # último error registrado para que el usuario tenga visibilidad.
-                raise last_error or RuntimeError(
+                if last_error is not None:
+                    raise last_error
+                raise RuntimeError(
                     "Fallo al guardar el modelo incluso tras aumentar el límite de recursión"
                 )
             
