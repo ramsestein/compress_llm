@@ -58,3 +58,4 @@ def test_randomized_svd_returns_correct_shapes():
     # original sin errores de orientación
     recon = (U * S) @ V.t()
     assert recon.shape == weight.shape
+
