@@ -9,6 +9,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from create_compress.compression_engine import CompressionEngine, QuantizedLinear
 from create_compress.compression_methods import LowRankApproximation
+from transformers import GPT2Config, AutoModelForCausalLM
+from transformers.utils import is_safetensors_available
+from apply_compression import save_pretrained_with_fallback
 
 
 def test_calculate_quantization_params_constant_tensor():
@@ -58,4 +61,11 @@ def test_randomized_svd_returns_correct_shapes():
     # original sin errores de orientación
     recon = (U * S) @ V.t()
     assert recon.shape == weight.shape
+
+@pytest.mark.skipif(not is_safetensors_available(), reason="safetensors not installed")
+def test_save_pretrained_with_fallback_creates_safetensors(tmp_path):
+    config = GPT2Config(n_layer=1, n_head=1, n_embd=32)
+    model = AutoModelForCausalLM.from_config(config)
+    save_pretrained_with_fallback(model, None, tmp_path)
+    assert (tmp_path / "model.safetensors").exists()
 
