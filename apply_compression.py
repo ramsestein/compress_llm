@@ -238,17 +238,30 @@ class ModelCompressor:
 
             logger.info("\n💾 Guardando modelo comprimido...")
             # 5. Guardar modelo comprimido
-            try:
-                model.save_pretrained(self.output_path)
-                if tokenizer is not None:
-                    tokenizer.save_pretrained(self.output_path)
-            except RecursionError:
-                import sys
-                logger.error("RecursionError al guardar, incrementando límite y reintentando")
-                sys.setrecursionlimit(sys.getrecursionlimit() * 2)
-                model.save_pretrained(self.output_path)
-                if tokenizer is not None:
-                    tokenizer.save_pretrained(self.output_path)
+            # Guardar el modelo, reintentando si se alcanza el límite de
+            # recursión.  En algunos modelos con muchas capas o estructuras
+            # modificadas por la compresión, `save_pretrained` puede requerir
+            # un límite de recursión mayor al predeterminado de Python.  Se
+            # incrementa progresivamente hasta tres veces para evitar que la
+            # ejecución termine con un `RecursionError`.
+            import sys
+            for attempt in range(3):
+                try:
+                    model.save_pretrained(self.output_path)
+                    if tokenizer is not None:
+                        tokenizer.save_pretrained(self.output_path)
+                    break
+                except RecursionError:
+                    new_limit = sys.getrecursionlimit() * 2
+                    logger.error(
+                        f"RecursionError al guardar (intento {attempt + 1}), "
+                        f"aumentando límite a {new_limit}"
+                    )
+                    sys.setrecursionlimit(new_limit)
+            else:
+                # Si después de varios intentos sigue fallando, propagar el
+                # error para que el usuario tenga visibilidad.
+                raise
             
             # 6. Copiar archivos adicionales
             self._copy_additional_files()

@@ -125,9 +125,37 @@ class LayerProfiler:
         if any(x in name_lower for x in ['lm_head', 'output', 'classifier']):
             return 'output'
         
-        # Normalización
-        if 'norm' in name_lower:
-            return 'normalization'
+        # Normalización: ampliar patrones y detección por tipo de módulo
+        #
+        # Durante el análisis del modelo original se clasificaban como
+        # "normalization" únicamente aquellas capas que contenían la cadena
+        # "norm" en su nombre. Modelos como GPT‑2 usan la nomenclatura
+        # "ln_1", "ln_2", etc., que quedaban sin detectar y por lo tanto no
+        # se incluían en la configuración de compresión. Al aplicar la
+        # compresión, otro clasificador sí identificaba estas capas y se
+        # generaban advertencias del tipo "No hay configuración para tipo
+        # 'normalization'".  Esto hacía que las capas de normalización se
+        # preservaran de forma implícita y se mostraran advertencias ruidosas.
+
+        # Para unificar la detección entre el análisis y la compresión, se
+        # amplían los patrones reconocidos e incluso se verifica el tipo del
+        # módulo. De esta forma cualquier capa de normalización será
+        # correctamente etiquetada y aparecerá en la configuración generada.
+        if isinstance(
+            module,
+            (
+                torch.nn.LayerNorm,
+                torch.nn.BatchNorm1d,
+                torch.nn.BatchNorm2d,
+                torch.nn.BatchNorm3d,
+                torch.nn.GroupNorm,
+            ),
+        ):
+            return "normalization"
+
+        norm_patterns = ["norm", "ln", "layernorm", "batchnorm", "groupnorm"]
+        if any(p in name_lower for p in norm_patterns):
+            return "normalization"
         
         return 'other'
     
