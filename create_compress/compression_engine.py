@@ -16,6 +16,32 @@ from .compression_methods import (
     get_available_methods,
 )
 
+
+def _safe_quantile(tensor: torch.Tensor, q: float, sample_size: int = 100000) -> torch.Tensor:
+    """Calcula un cuantil de forma robusta para tensores grandes.
+
+    Convierte el tensor a ``float`` si es necesario y toma una muestra aleatoria
+    cuando el número de elementos es demasiado grande para ``torch.quantile``.
+    """
+    flat = tensor.flatten()
+    if flat.dtype not in (torch.float32, torch.float64):
+        flat = flat.float()
+    if flat.numel() > 1_000_000:
+        idx = torch.randint(0, flat.numel(), (min(sample_size, flat.numel()),), device=flat.device)
+        flat = flat[idx]
+    return torch.quantile(flat, q)
+
+
+def _safe_quantiles(tensor: torch.Tensor, qs: List[float], sample_size: int = 100000) -> torch.Tensor:
+    """Versión vectorizada de ``_safe_quantile`` para múltiples cuantiles."""
+    flat = tensor.flatten()
+    if flat.dtype not in (torch.float32, torch.float64):
+        flat = flat.float()
+    if flat.numel() > 1_000_000:
+        idx = torch.randint(0, flat.numel(), (min(sample_size, flat.numel()),), device=flat.device)
+        flat = flat[idx]
+    return torch.quantile(flat, torch.tensor(qs, device=flat.device))
+
 @dataclass
 class CompressionResult:
     """Resultado básico de aplicar compresión"""
@@ -225,15 +251,16 @@ class CompressionEngine:
             module.in_features,
             module.out_features,
             bias=module.bias is not None,
-            sparsity=strength
+            sparsity=strength,
         )
-        
-        # Crear máscara de poda
-        weights_abs = module.weight.data.abs()
-        threshold = torch.quantile(weights_abs.flatten(), strength)
-        mask = weights_abs > threshold
-        
-        pruned.weight.data = module.weight.data * mask
+
+        # Crear máscara de poda usando cuantiles robustos
+        weights = module.weight.data
+        weights_abs = weights.abs()
+        threshold = _safe_quantile(weights_abs, strength)
+        mask = weights_abs > threshold.to(weights_abs.device, weights_abs.dtype)
+
+        pruned.weight.data = weights * mask.to(weights.dtype)
         pruned.mask = mask
         
         if module.bias is not None:
@@ -603,14 +630,14 @@ class MixedPrecisionLinear(nn.Module):
     def set_weight_importance(self, weight):
         """Establece máscaras basadas en importancia de pesos"""
         importance = weight.abs()
-        flat_importance = importance.flatten()
+        qs = [
+            1 - self.high_precision_ratio,
+            1 - self.high_precision_ratio - self.medium_precision_ratio,
+        ]
+        high_threshold, medium_threshold = _safe_quantiles(importance, qs)
         
-        # Umbrales para diferentes precisiones
-        high_threshold = torch.quantile(flat_importance, 1 - self.high_precision_ratio)
-        medium_threshold = torch.quantile(flat_importance, 1 - self.high_precision_ratio - self.medium_precision_ratio)
-        
-        self.high_precision_mask = importance > high_threshold
-        self.medium_precision_mask = (importance > medium_threshold) & ~self.high_precision_mask
+        self.high_precision_mask = importance > high_threshold.to(importance.device, importance.dtype)
+        self.medium_precision_mask = (importance > medium_threshold.to(importance.device, importance.dtype)) & ~self.high_precision_mask
         
         # Asignar pesos
         self.weight_high.data = weight * self.high_precision_mask
