@@ -54,3 +54,8 @@ def test_randomized_svd_returns_correct_shapes():
     assert U.shape == (50, 10)
     assert S.shape == (10,)
     assert V.shape == (30, 10)
+    # La reconstrucción con las formas retornadas debe reproducir la forma
+    # original sin errores de orientación
+    recon = (U * S) @ V.t()
+    assert recon.shape == weight.shape
+

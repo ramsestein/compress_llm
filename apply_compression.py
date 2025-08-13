@@ -261,6 +261,14 @@ class ModelCompressor:
                     )
                     sys.setrecursionlimit(new_limit)
             else:
+                # Si después de varios intentos sigue fallando, propagar un
+                # error más descriptivo encadenado con el último
+                # ``RecursionError`` observado.  Esto evita mensajes crípticos
+                # como "No active exception to reraise".
+                if last_error is not None:
+                    raise RuntimeError(
+                        "Fallo al guardar el modelo incluso tras aumentar el límite de recursión"
+                    ) from last_error
                 # Si después de varios intentos sigue fallando, propagar el
                 # último error registrado para que el usuario tenga visibilidad.
                 if last_error is not None:
