@@ -257,8 +257,13 @@ class LowRankApproximation(CompressionMethod):
                 else:
                     U, S, V = torch.svd_lowrank(weight, q=target_rank)
                 
-                # Reconstruir peso aproximado
-                weight_approx = U @ torch.diag(S) @ V.T
+                # Reconstruir peso aproximado evitando la creación explícita de
+                # una matriz diagonal grande.  ``torch.diag`` puede ser costoso
+                # y en algunos casos provoca problemas de forma cuando las
+                # orientaciones de las matrices no coinciden exactamente.  Al
+                # multiplicar directamente por ``S`` aprovechamos el broadcast
+                # para escalar las columnas de ``U`` antes de aplicar ``V``.
+                weight_approx = (U * S) @ V.t()
                 
                 # Aplicar directamente al módulo original
                 module.weight.data = weight_approx.to(original_dtype)
@@ -290,9 +295,12 @@ class LowRankApproximation(CompressionMethod):
         B = Q.T @ matrix
         U_tilde, S, Vh = torch.linalg.svd(B, full_matrices=False)
         U = Q @ U_tilde
-        
-        # Retornar solo los primeros 'rank' componentes
-        return U[:, :rank], S[:rank], Vh[:rank, :]
+
+        # Retornar solo los primeros 'rank' componentes. ``torch.linalg.svd``
+        # devuelve ``Vh`` con forma (rank, n); usamos ``.t()`` para obtener una
+        # matriz ``V`` de forma (n, rank) que coincida con la orientación de
+        # ``torch.svd_lowrank``.
+        return U[:, :rank], S[:rank], Vh[:rank, :].t()
     
     def estimate_compression(self, module: nn.Module, config: Dict[str, Any]) -> float:
         """Estima compresión por bajo rango"""
