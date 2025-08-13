@@ -294,6 +294,45 @@ class ModelCompressor:
             # tradicional incrementando el límite de recursión si es
             # necesario.
             save_pretrained_with_fallback(model, tokenizer, self.output_path)
+            # 5. Guardar modelo comprimido
+            # Guardar el modelo, reintentando si se alcanza el límite de
+            # recursión.  En algunos modelos con muchas capas o estructuras
+            # modificadas por la compresión, `save_pretrained` puede requerir
+            # un límite de recursión mayor al predeterminado de Python.  Se
+            # incrementa progresivamente hasta tres veces para evitar que la
+            # ejecución termine con un `RecursionError`.
+            import sys
+            last_error = None
+            for attempt in range(3):
+                try:
+                    model.save_pretrained(self.output_path)
+                    if tokenizer is not None:
+                        tokenizer.save_pretrained(self.output_path)
+                    break
+                except RecursionError as e:
+                    last_error = e
+                    new_limit = sys.getrecursionlimit() * 2
+                    logger.error(
+                        f"RecursionError al guardar (intento {attempt + 1}), "
+                        f"aumentando límite a {new_limit}"
+                    )
+                    sys.setrecursionlimit(new_limit)
+            else:
+                # Si después de varios intentos sigue fallando, propagar un
+                # error más descriptivo encadenado con el último
+                # ``RecursionError`` observado.  Esto evita mensajes crípticos
+                # como "No active exception to reraise".
+                if last_error is not None:
+                    raise RuntimeError(
+                        "Fallo al guardar el modelo incluso tras aumentar el límite de recursión"
+                    ) from last_error
+                # Si después de varios intentos sigue fallando, propagar el
+                # último error registrado para que el usuario tenga visibilidad.
+                if last_error is not None:
+                    raise last_error
+                raise RuntimeError(
+                    "Fallo al guardar el modelo incluso tras aumentar el límite de recursión"
+                )
             
             # 6. Copiar archivos adicionales
             self._copy_additional_files()

@@ -301,7 +301,12 @@ class LowRankApproximation(CompressionMethod):
         # matriz ``V`` de forma (n, rank) que coincida con la orientación de
         # ``torch.svd_lowrank``.
         return U[:, :rank], S[:rank], Vh[:rank, :].t()
-    
+        # Retornar solo los primeros 'rank' componentes.
+        # ``torch.linalg.svd`` devuelve ``Vh`` con forma (rank, n), por lo que
+        # lo transponemos para alinear con la convención de ``torch.svd_lowrank``
+        # que retorna ``V`` con forma (n, rank).
+        return U[:, :rank], S[:rank], Vh[:rank, :].T
+      
     def estimate_compression(self, module: nn.Module, config: Dict[str, Any]) -> float:
         """Estima compresión por bajo rango"""
         if not isinstance(module, nn.Linear):
