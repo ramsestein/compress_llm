@@ -13,8 +13,8 @@ from typing import Dict, Any, Optional, List, Tuple
 import torch
 import torch.nn as nn
 from transformers import (
-    AutoModelForCausalLM, 
-    AutoTokenizer, 
+    AutoModelForCausalLM,
+    AutoTokenizer,
     AutoConfig,
     PreTrainedModel
 )
@@ -22,6 +22,7 @@ from tqdm import tqdm
 import logging
 from datetime import datetime
 import gc
+from transformers.utils import is_safetensors_available
 
 # Importar el motor de compresión
 from create_compress.compression_engine import CompressionEngine
@@ -32,6 +33,57 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def save_pretrained_with_fallback(
+    model: PreTrainedModel,
+    tokenizer: Optional[Any],
+    output_dir: Path,
+    *,
+    logger: logging.Logger = logger,
+) -> None:
+    """Save a model, preferring safetensors and falling back to pickle.
+
+    If ``safetensors`` is available, ``safe_serialization=True`` is used to
+    avoid Python's pickle recursion limits.  Should that fail or be
+    unavailable, the function retries the standard ``save_pretrained`` call
+    while progressively increasing the Python recursion limit.  After three
+    failed attempts a ``RuntimeError`` is raised, chained with the last
+    ``RecursionError`` for clearer debugging.
+    """
+
+    # First try safetensors to avoid pickle altogether
+    if is_safetensors_available():
+        try:
+            model.save_pretrained(output_dir, safe_serialization=True)
+            if tokenizer is not None:
+                tokenizer.save_pretrained(output_dir)
+            return
+        except Exception as e:  # pragma: no cover - extremely rare
+            logger.warning(
+                f"Safe serialization falló, usando formato tradicional: {e}"
+            )
+
+    import sys
+    last_error: Optional[RecursionError] = None
+    for attempt in range(3):
+        try:
+            model.save_pretrained(output_dir, safe_serialization=False)
+            if tokenizer is not None:
+                tokenizer.save_pretrained(output_dir)
+            return
+        except RecursionError as e:
+            last_error = e
+            new_limit = sys.getrecursionlimit() * 2
+            logger.error(
+                f"RecursionError al guardar (intento {attempt + 1}), "
+                f"aumentando límite a {new_limit}"
+            )
+            sys.setrecursionlimit(new_limit)
+
+    raise RuntimeError(
+        "Fallo al guardar el modelo incluso tras aumentar el límite de recursión"
+    ) from last_error
 
 class ModelCompressor:
     """Gestor principal de compresión de modelos"""
@@ -237,35 +289,11 @@ class ModelCompressor:
             self._cleanup_model(model)
 
             logger.info("\n💾 Guardando modelo comprimido...")
-            # 5. Guardar modelo comprimido
-            # Guardar el modelo, reintentando si se alcanza el límite de
-            # recursión.  En algunos modelos con muchas capas o estructuras
-            # modificadas por la compresión, `save_pretrained` puede requerir
-            # un límite de recursión mayor al predeterminado de Python.  Se
-            # incrementa progresivamente hasta tres veces para evitar que la
-            # ejecución termine con un `RecursionError`.
-            import sys
-            last_error = None
-            for attempt in range(3):
-                try:
-                    model.save_pretrained(self.output_path)
-                    if tokenizer is not None:
-                        tokenizer.save_pretrained(self.output_path)
-                    break
-                except RecursionError as e:
-                    last_error = e
-                    new_limit = sys.getrecursionlimit() * 2
-                    logger.error(
-                        f"RecursionError al guardar (intento {attempt + 1}), "
-                        f"aumentando límite a {new_limit}"
-                    )
-                    sys.setrecursionlimit(new_limit)
-            else:
-                # Si después de varios intentos sigue fallando, propagar el
-                # último error registrado para que el usuario tenga visibilidad.
-                raise last_error or RuntimeError(
-                    "Fallo al guardar el modelo incluso tras aumentar el límite de recursión"
-                )
+            # 5. Guardar el modelo comprimido utilizando safetensors cuando
+            # esté disponible; de lo contrario, se reintenta el guardado
+            # tradicional incrementando el límite de recursión si es
+            # necesario.
+            save_pretrained_with_fallback(model, tokenizer, self.output_path)
             
             # 6. Copiar archivos adicionales
             self._copy_additional_files()
