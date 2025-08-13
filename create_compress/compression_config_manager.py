@@ -226,10 +226,19 @@ class CompressionConfigManager:
         # Copiar config de capas del perfil seleccionado
         layer_configs = profile.get('layer_configs', {}).copy()
 
-        # Asegurar que todos los tipos detectados tengan al menos una
-        # configuración "sin compresión" para evitar advertencias durante
-        # la aplicación de la compresión.
-        for layer_type in self.layer_types.keys():
+        # Tipos estándar que deben existir incluso si no aparecen en el
+        # análisis del modelo. Esto garantiza que capas como las de
+        # normalización tengan una configuración explícita y puedan ser
+        # modificadas posteriormente por el usuario.
+        standard_types = {
+            'embedding', 'attention', 'ffn', 'linear', 'normalization',
+            'output', 'conv', 'other', 'skip'
+        }
+
+        # Asegurar que todos los tipos detectados o estándar tengan al menos
+        # una configuración "sin compresión" para evitar errores durante la
+        # aplicación.
+        for layer_type in set(self.layer_types.keys()) | standard_types:
             if layer_type not in layer_configs:
                 layer_configs[layer_type] = {
                     'methods': [{'name': 'none', 'strength': 0.0}],

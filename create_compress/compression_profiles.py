@@ -91,6 +91,12 @@ COMPRESSION_PROFILES = {
                 ],
                 'total_compression_ratio': 0.5
             },
+            'normalization': {
+                'methods': [
+                    {'name': 'none', 'strength': 0.0}
+                ],
+                'total_compression_ratio': 0.0
+            },
             'other': {
                 'methods': [
                     {'name': 'magnitude_pruning', 'strength': 0.4}
@@ -162,6 +168,12 @@ COMPRESSION_PROFILES = {
                 ],
                 'total_compression_ratio': 0.7
             },
+            'normalization': {
+                'methods': [
+                    {'name': 'none', 'strength': 0.0}
+                ],
+                'total_compression_ratio': 0.0
+            },
             'other': {
                 'methods': [
                     {'name': 'magnitude_pruning', 'strength': 0.6},
@@ -224,6 +236,12 @@ COMPRESSION_PROFILES = {
                 ],
                 'total_compression_ratio': 0.35
             },
+            'normalization': {
+                'methods': [
+                    {'name': 'none', 'strength': 0.0}
+                ],
+                'total_compression_ratio': 0.0
+            },
             'other': {
                 'methods': [
                     {'name': 'magnitude_pruning', 'strength': 0.5}
@@ -270,6 +288,12 @@ COMPRESSION_PROFILES = {
                     {'name': 'int8_quantization', 'strength': 0.8}
                 ],
                 'total_compression_ratio': 0.5
+            },
+            'normalization': {
+                'methods': [
+                    {'name': 'none', 'strength': 0.0}
+                ],
+                'total_compression_ratio': 0.0
             },
             'other': {
                 'methods': [
@@ -318,6 +342,12 @@ COMPRESSION_PROFILES = {
                     {'name': 'int4_quantization', 'strength': 0.8}
                 ],
                 'total_compression_ratio': 0.6
+            },
+            'normalization': {
+                'methods': [
+                    {'name': 'none', 'strength': 0.0}
+                ],
+                'total_compression_ratio': 0.0
             },
             'other': {
                 'methods': [
