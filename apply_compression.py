@@ -245,13 +245,15 @@ class ModelCompressor:
             # incrementa progresivamente hasta tres veces para evitar que la
             # ejecución termine con un `RecursionError`.
             import sys
+            last_error = None
             for attempt in range(3):
                 try:
                     model.save_pretrained(self.output_path)
                     if tokenizer is not None:
                         tokenizer.save_pretrained(self.output_path)
                     break
-                except RecursionError:
+                except RecursionError as e:
+                    last_error = e
                     new_limit = sys.getrecursionlimit() * 2
                     logger.error(
                         f"RecursionError al guardar (intento {attempt + 1}), "
@@ -260,8 +262,10 @@ class ModelCompressor:
                     sys.setrecursionlimit(new_limit)
             else:
                 # Si después de varios intentos sigue fallando, propagar el
-                # error para que el usuario tenga visibilidad.
-                raise
+                # último error registrado para que el usuario tenga visibilidad.
+                raise last_error or RuntimeError(
+                    "Fallo al guardar el modelo incluso tras aumentar el límite de recursión"
+                )
             
             # 6. Copiar archivos adicionales
             self._copy_additional_files()
