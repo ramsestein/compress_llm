@@ -15,6 +15,8 @@ import multiprocessing as mp
 from functools import lru_cache
 import hashlib
 
+
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -30,6 +32,9 @@ class DatasetConfig:
     validation_split: float = 0.1
     test_split: float = 0.0
     max_length: Optional[int] = None
+    eval_split_ratio: float = 0.1
+    instruction_template: Optional[str] = None
+    dataset_type: Optional[str] = None
     
     # Cache
     _hash: str = field(default="", init=False)
@@ -46,7 +51,9 @@ class DatasetConfig:
             'delimiter': self.delimiter,
             'validation_split': self.validation_split,
             'test_split': self.test_split,
-            'max_length': self.max_length
+            'max_length': self.max_length,
+            'eval_split_ratio': self.eval_split_ratio,
+            'instruction_template': self.instruction_template
         }
     
     @property
@@ -187,6 +194,17 @@ class OptimizedDatasetManager:
         elif format_type == 'text':
             self._analyze_text(file_path, info)
         
+        # Asegurar que el campo 'size' esté presente
+        if 'size' not in info:
+            if 'estimated_rows' in info:
+                info['size'] = info['estimated_rows']
+            elif 'num_rows' in info:
+                info['size'] = info['num_rows']
+            elif 'num_lines' in info:
+                info['size'] = info['num_lines']
+            else:
+                info['size'] = 0
+        
         return info
     
     def _analyze_csv(self, file_path: Path, info: Dict[str, Any]):
@@ -324,6 +342,225 @@ class OptimizedDatasetManager:
                     break
         
         return detected
+    
+    def configure_dataset_interactive(self, dataset_info: Dict[str, Any]) -> Optional[DatasetConfig]:
+        """Configura un dataset de forma interactiva preguntando al usuario"""
+        try:
+            # Mostrar información del dataset
+            print(f"\n=== Configurando Dataset: {dataset_info.get('name', 'dataset')} ===")
+            print(f"📁 Archivo: {dataset_info.get('file_path', 'N/A')}")
+            print(f"📊 Formato: {dataset_info.get('format', 'N/A').upper()}")
+            print(f"📈 Tamaño estimado: {dataset_info.get('size', 'N/A')} registros")
+            
+            # Mostrar columnas detectadas
+            detected_columns = dataset_info.get('detected_columns', {})
+            if detected_columns:
+                print("\n--- Columnas Detectadas ---")
+                for col_name, col_type in detected_columns.items():
+                    print(f"  {col_name}: {col_type} - {self._get_column_description(col_name, col_type)}")
+            
+            # Preguntar tipo de dataset
+            print("\n🎯 ¿Qué tipo de dataset es este?")
+            print("  [1] Entrenamiento supervisado (instrucción → respuesta)")
+            print("  [2] Conversaciones (chat multi-turno)")
+            print("  [3] Texto directo (documentos, artículos)")
+            print("  [4] Completado de texto")
+            
+            while True:
+                dataset_type = input("Selecciona tipo (1-4): ").strip()
+                if dataset_type in ["1", "2", "3", "4"]:
+                    break
+                print("Por favor selecciona 1, 2, 3 o 4")
+            
+            # Configurar según el tipo
+            if dataset_type == "1":  # Supervisado
+                config = self._configure_supervised_dataset(dataset_info)
+            elif dataset_type == "2":  # Conversaciones
+                config = self._configure_conversation_dataset(dataset_info)
+            elif dataset_type == "3":  # Texto directo
+                config = self._configure_text_dataset(dataset_info)
+            else:  # Completado
+                config = self._configure_completion_dataset(dataset_info)
+            
+            # Configuración adicional
+            while True:
+                try:
+                    max_length_input = input(f"Longitud máxima de secuencia (default: 512): ").strip()
+                    config.max_length = int(max_length_input) if max_length_input else 512
+                    break
+                except ValueError:
+                    print("Por favor ingresa un número válido")
+            
+            while True:
+                try:
+                    eval_ratio_input = input(f"Proporción para evaluación 0.0-1.0 (default: 0.1): ").strip()
+                    config.eval_split_ratio = float(eval_ratio_input) if eval_ratio_input else 0.1
+                    if 0.0 <= config.eval_split_ratio <= 1.0:
+                        break
+                    print("La proporción debe estar entre 0.0 y 1.0")
+                except ValueError:
+                    print("Por favor ingresa un número válido")
+            
+            # Confirmar configuración
+            print(f"\n✅ Dataset configurado exitosamente!")
+            print(f"📝 Tipo: {self._get_dataset_type_name(dataset_type)}")
+            print(f"📏 Longitud máxima: {config.max_length}")
+            print(f"📊 Split evaluación: {config.eval_split_ratio*100:.1f}%")
+            
+            return config
+            
+        except Exception as e:
+            logger.error(f"Error configurando dataset: {e}")
+            return None
+    
+    def _configure_supervised_dataset(self, dataset_info: Dict[str, Any]) -> DatasetConfig:
+        """Configura dataset supervisado"""
+        print("\nConfigurando dataset supervisado...")
+        
+        # Preguntar columnas de entrada y salida
+        input_col = input("Columna de entrada (instrucción/pregunta) [default: instruction]: ").strip()
+        if not input_col:
+            input_col = "instruction"
+        
+        output_col = input("Columna de salida (respuesta) [default: response]: ").strip()
+        if not output_col:
+            output_col = "response"
+        
+        # Template de instrucción
+        print("\nTemplate de instrucción:")
+        print("  [1] Simple: {instruction}\n{response}")
+        print("  [2] Alpaca: Below is an instruction...\n{instruction}\n\n{response}")
+        print("  [3] Personalizado")
+        
+        while True:
+            template_choice = input("Selecciona template (1-3) [default: 1]: ").strip()
+            if not template_choice:
+                template_choice = "1"
+            if template_choice in ["1", "2", "3"]:
+                break
+            print("Por favor selecciona 1, 2 o 3")
+        
+        if template_choice == "1":
+            instruction_template = "{instruction}\n{response}"
+        elif template_choice == "2":
+            instruction_template = "Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:\n{response}"
+        else:
+            instruction_template = input("Escribe tu template personalizado: ")
+        
+        return DatasetConfig(
+            file_path=Path(dataset_info['file_path']),
+            format=dataset_info['format'],
+            columns={input_col: "text", output_col: "text"},
+            name=dataset_info.get('name', 'dataset'),
+            size=dataset_info.get('size', 0),
+            instruction_template=instruction_template,
+            dataset_type="supervised"
+        )
+    
+    def _configure_conversation_dataset(self, dataset_info: Dict[str, Any]) -> DatasetConfig:
+        """Configura dataset de conversaciones"""
+        print("\nConfigurando dataset de conversaciones...")
+        
+        # Preguntar formato de conversación
+        print("  [1] OpenAI (messages array)")
+        print("  [2] Alpaca (instruction/response)")
+        print("  [3] Personalizado")
+        
+        while True:
+            format_choice = input("Formato de conversación (1-3) [default: 1]: ").strip()
+            if not format_choice:
+                format_choice = "1"
+            if format_choice in ["1", "2", "3"]:
+                break
+            print("Por favor selecciona 1, 2 o 3")
+        
+        if format_choice == "1":
+            messages_col = input("Columna con mensajes [default: messages]: ").strip()
+            if not messages_col:
+                messages_col = "messages"
+            columns = {messages_col: "messages"}
+        elif format_choice == "2":
+            instruction_col = input("Columna de instrucción [default: instruction]: ").strip()
+            if not instruction_col:
+                instruction_col = "instruction"
+            response_col = input("Columna de respuesta [default: response]: ").strip()
+            if not response_col:
+                response_col = "response"
+            columns = {instruction_col: "text", response_col: "text"}
+        else:
+            # Personalizado
+            custom_cols = input("Columnas (separadas por comas): ")
+            columns = {col.strip(): "text" for col in custom_cols.split(",")}
+        
+        return DatasetConfig(
+            file_path=Path(dataset_info['file_path']),
+            format=dataset_info['format'],
+            columns=columns,
+            name=dataset_info.get('name', 'dataset'),
+            size=dataset_info.get('size', 0),
+            dataset_type="conversation"
+        )
+    
+    def _configure_text_dataset(self, dataset_info: Dict[str, Any]) -> DatasetConfig:
+        """Configura dataset de texto directo"""
+        print("\nConfigurando dataset de texto directo...")
+        
+        text_col = input("Columna con fragmentos de texto [default: text]: ").strip()
+        if not text_col:
+            text_col = "text"
+        
+        return DatasetConfig(
+            file_path=Path(dataset_info['file_path']),
+            format=dataset_info['format'],
+            columns={text_col: "text"},
+            name=dataset_info.get('name', 'dataset'),
+            size=dataset_info.get('size', 0),
+            dataset_type="text"
+        )
+    
+    def _configure_completion_dataset(self, dataset_info: Dict[str, Any]) -> DatasetConfig:
+        """Configura dataset de completado"""
+        print("\nConfigurando dataset de completado...")
+        
+        prompt_col = input("Columna de prompt [default: prompt]: ").strip()
+        if not prompt_col:
+            prompt_col = "prompt"
+        completion_col = input("Columna de completado [default: completion]: ").strip()
+        if not completion_col:
+            completion_col = "completion"
+        
+        return DatasetConfig(
+            file_path=Path(dataset_info['file_path']),
+            format=dataset_info['format'],
+            columns={prompt_col: "text", completion_col: "text"},
+            name=dataset_info.get('name', 'dataset'),
+            size=dataset_info.get('size', 0),
+            dataset_type="completion"
+        )
+    
+    def _get_column_description(self, col_name: str, col_type: str) -> str:
+        """Obtiene descripción de una columna"""
+        descriptions = {
+            "instruction": "Instrucción o pregunta del usuario",
+            "response": "Respuesta o solución esperada",
+            "text": "Texto a procesar",
+            "messages": "Array de mensajes de conversación",
+            "prompt": "Texto de entrada para completar",
+            "completion": "Texto de salida esperado",
+            "input": "Entrada del modelo",
+            "output": "Salida esperada"
+        }
+        return descriptions.get(col_name.lower(), f"Columna de tipo {col_type}")
+    
+    def _get_dataset_type_name(self, dataset_type: str) -> str:
+        """Obtiene nombre legible del tipo de dataset"""
+        types = {
+            "1": "Supervisado (Instrucción→Respuesta)",
+            "2": "Conversaciones",
+            "3": "Texto Directo",
+            "4": "Completado"
+        }
+        return types.get(dataset_type, "Desconocido")
     
     def load_dataset(self, config: DatasetConfig, 
                     split: str = 'train',

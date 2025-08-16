@@ -1,0 +1,145 @@
+# Entornos virtuales
+venv*/
+comp_venv/
+venv_clean/
+env/
+ENV/
+
+# Archivos de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Modelos y pesos (archivos muy pesados)
+models/*/
+!models/*/config.json
+!models/*/generation_config.json
+!models/*/tokenizer_config.json
+!models/*/vocab.json
+!models/*/merges.txt
+!models/*/README.md
+
+# Archivos de compresión
+compression_analysis/*.json
+compression_analysis/*.html
+!compression_analysis/*_compression_config.json
+
+# Archivos de LoRA
+lora_output/
+LoRa_train/*/checkpoint-*/
+LoRa_train/*/runs/
+LoRa_train/*/wandb/
+
+# Datasets
+datasets/*.csv
+datasets/*.json
+datasets/*.txt
+
+# Logs y archivos temporales
+*.log
+logs/
+*.tmp
+*.cache
+*.bak
+*.backup
+*~
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-*
+
+# Archivos de configuración local
+.env
+config.local.*
+*.local
+
+# Archivos de caché de Python
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Archivos de Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# Archivos de respaldo
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Archivos multimedia
+*.mp3
+*.mp4
+*.wav
+*.avi
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+
+# Documentos
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+
+# Archivos de PyTorch específicos
+*.pth
+*.pt
+*.bin
+*.safetensors
+*.msgpack
+*.h5
+
+# Archivos de Hugging Face
+.cache/
+transformers_cache/
+huggingface_cache/
+
+# Archivos de entrenamiento
+checkpoints/
+runs/
+wandb/
+tensorboard_logs/
+
+# Archivos de prueba
+test_outputs/
+test_results/
+temp/
+tmp/

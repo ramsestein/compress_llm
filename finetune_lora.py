@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 # Importar módulos locales
-from LoRa_train.dataset_manager import DatasetManager, DatasetConfig
+from LoRa_train.dataset_manager import OptimizedDatasetManager, DatasetConfig
 from LoRa_train.lora_config import LoRAConfig, TrainingConfig, DataConfig, LoRAPresets
 from LoRa_train.lora_trainer import LoRATrainer
 
@@ -115,7 +115,7 @@ class FineTuneWizard:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        self.dataset_manager = DatasetManager(datasets_dir)
+        self.dataset_manager = OptimizedDatasetManager(datasets_dir)
         self.selected_datasets = []
         self.model_name = None
         self.model_path = None
@@ -272,15 +272,19 @@ Este asistente te guiará para:
         table.add_column("Columnas detectadas")
         
         for i, dataset in enumerate(available_datasets, 1):
-            cols = ", ".join(dataset.get('detected_columns', [])[:3])
-            if len(dataset.get('detected_columns', [])) > 3:
-                cols += "..."
+            detected_cols = dataset.get('detected_columns', [])
+            if isinstance(detected_cols, list):
+                cols = ", ".join(detected_cols[:3])
+                if len(detected_cols) > 3:
+                    cols += "..."
+            else:
+                cols = str(detected_cols) if detected_cols else "N/A"
             
             table.add_row(
                 str(i),
-                dataset['name'],
-                dataset['format'].upper(),
-                str(dataset['size']),
+                dataset.get('name', 'N/A'),
+                dataset.get('format', 'N/A').upper(),
+                str(dataset.get('size', 'N/A')),
                 cols
             )
         
@@ -339,8 +343,8 @@ Este asistente te guiará para:
         if choice == "4":
             # Configuración personalizada
             lora_config = LoRAConfig(
-                r=IntPrompt.ask("Rango (r)", default=16, min_value=1, max_value=256),
-                lora_alpha=IntPrompt.ask("Alpha", default=32),
+                            r=IntPrompt.ask("Rango (r)", default=16),
+            lora_alpha=IntPrompt.ask("Alpha", default=32),
                 lora_dropout=FloatPrompt.ask("Dropout", default=0.1),
                 target_modules=self._select_target_modules()
             )
@@ -474,9 +478,7 @@ Este asistente te guiará para:
         # Longitud máxima
         data_config.max_length = IntPrompt.ask(
             "Longitud máxima de secuencia", 
-            default=512,
-            min_value=128,
-            max_value=4096
+            default=512
         )
         
         # Template
@@ -498,9 +500,7 @@ Este asistente te guiará para:
         # Split de evaluación
         data_config.eval_split_ratio = FloatPrompt.ask(
             "Proporción para evaluación", 
-            default=0.1,
-            min_value=0.0,
-            max_value=0.5
+            default=0.1
         )
         
         return data_config

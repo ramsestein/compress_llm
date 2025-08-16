@@ -28,7 +28,7 @@ from LoRa_train.peft_methods_config import (
 )
 
 # Importar componentes existentes
-from LoRa_train.dataset_manager import DatasetManager, DatasetConfig
+from LoRa_train.dataset_manager import OptimizedDatasetManager, DatasetConfig
 from LoRa_train.lora_trainer import LoRATrainer  # Adaptaremos esto
 
 # Configurar logging
@@ -61,7 +61,7 @@ class PEFTFineTuneWizard:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        self.dataset_manager = DatasetManager(datasets_dir)
+        self.dataset_manager = OptimizedDatasetManager(datasets_dir)
         self.selected_datasets = []
         self.model_name = None
         self.peft_method = None
@@ -131,8 +131,15 @@ class PEFTFineTuneWizard:
         methods = list(PEFTMethod)
         for i, method in enumerate(methods, 1):
             desc_lines = self.METHOD_DESCRIPTIONS[method].split('\n')
-            main_desc = desc_lines[0].split(' - ')[1]
-            params = desc_lines[1].replace('• ', '')
+            if len(desc_lines) > 0 and ' - ' in desc_lines[0]:
+                main_desc = desc_lines[0].split(' - ')[1]
+            else:
+                main_desc = method.value.upper()
+            
+            if len(desc_lines) > 1:
+                params = desc_lines[1].replace('• ', '')
+            else:
+                params = "N/A"
             
             table.add_row(
                 str(i),
@@ -216,11 +223,13 @@ class PEFTFineTuneWizard:
         table.add_column("Registros", justify="right")
         
         for i, dataset in enumerate(available, 1):
+            # Get size from various possible fields
+            size = dataset.get('size', dataset.get('estimated_rows', dataset.get('num_rows', 'N/A')))
             table.add_row(
                 str(i),
                 dataset['name'],
                 dataset['format'].upper(),
-                str(dataset['size'])
+                str(size)
             )
         
         console.print(table)

@@ -49,7 +49,7 @@ from .peft_methods import (
 
 # Importar entrenadores
 from .lora_trainer import LoRATrainer
-from .peft_universal_trainer import UniversalPEFTTrainer, load_peft_model
+from .peft_universal_trainer import PEFTUniversalTrainer
 
 # Importar gestor de datasets
 from .dataset_manager import (
@@ -100,8 +100,7 @@ __all__ = [
     
     # Entrenadores
     "LoRATrainer",
-    "UniversalPEFTTrainer",
-    "load_peft_model",
+    "PEFTUniversalTrainer",
     
     # Dataset manager
     "DatasetConfig",

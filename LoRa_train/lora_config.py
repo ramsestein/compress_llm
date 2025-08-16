@@ -172,7 +172,12 @@ class LoRAPresets:
                     r=8,
                     lora_alpha=16,
                     lora_dropout=0.05,
-                    target_modules=["lm_head", "embed_tokens"]
+                    target_modules=[
+                        "transformer.h.0.attn.c_attn",
+                        "transformer.h.0.attn.c_proj",
+                        "transformer.h.0.mlp.c_fc",
+                        "transformer.h.0.mlp.c_proj"
+                    ]
                 ),
                 "training": TrainingConfig(
                     num_train_epochs=1,
