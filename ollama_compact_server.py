@@ -68,7 +68,9 @@ class ModelInfo(BaseModel):
 
 # ================== Servidor Ollama-Compatible ==================
 
-class OllamaCompatServer:
+class OllamaCompactServer:
+    """Servidor compatible con Ollama API"""
+    
     def __init__(self, models_dir: str = "./models"):
         self.models_dir = Path(models_dir)
         self.models_dir.mkdir(parents=True, exist_ok=True)
@@ -237,133 +239,9 @@ class OllamaCompatServer:
             self.current_tokenizer = None
             self.current_model_name = None
             return False
-    
-    async def generate_stream(self, 
-                            prompt: str, 
-                            system: Optional[str] = None,
-                            options: Dict[str, Any] = None) -> AsyncGenerator[str, None]:
-        """Genera texto en streaming"""
-        if self.current_model is None:
-            yield json.dumps({"error": "No hay modelo cargado"})
-            return
-        
-        # Configuración de generación
-        temperature = options.get("temperature", 0.7) if options else 0.7
-        max_tokens = options.get("num_predict", 200) if options else 200
-        top_p = options.get("top_p", 0.95) if options else 0.95
-        top_k = options.get("top_k", 40) if options else 40
-        repeat_penalty = options.get("repeat_penalty", 1.1) if options else 1.1
-        
-        # Construir prompt completo
-        full_prompt = prompt
-        if system:
-            full_prompt = f"{system}\n\n{prompt}"
-        
-        # Tokenizar
-        inputs = self.current_tokenizer(full_prompt, return_tensors="pt")
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        
-        # Configurar streamer
-        streamer = TextIteratorStreamer(
-            self.current_tokenizer,
-            skip_prompt=True,
-            skip_special_tokens=True
-        )
-        
-        # Configurar generación
-        generation_kwargs = {
-            "input_ids": inputs["input_ids"],
-            "attention_mask": inputs["attention_mask"],
-            "max_new_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": top_p,
-            "top_k": top_k,
-            "repetition_penalty": repeat_penalty,
-            "do_sample": temperature > 0,
-            "pad_token_id": self.current_tokenizer.pad_token_id,
-            "eos_token_id": self.current_tokenizer.eos_token_id,
-            "streamer": streamer
-        }
-        
-        # Thread para generación
-        thread = Thread(target=self.current_model.generate, kwargs=generation_kwargs)
-        thread.start()
-        
-        # Stream de tokens
-        generated_text = ""
-        created_at = datetime.now().isoformat() + "Z"
-        
-        try:
-            for token in streamer:
-                generated_text += token
-                
-                # Formato Ollama
-                response = {
-                    "model": self.current_model_name,
-                    "created_at": created_at,
-                    "response": token,
-                    "done": False
-                }
-                
-                yield json.dumps(response) + "\n"
-                await asyncio.sleep(0)  # Yield control
-            
-            # Respuesta final
-            final_response = {
-                "model": self.current_model_name,
-                "created_at": created_at,
-                "response": "",
-                "done": True,
-                "context": [],  # Por ahora vacío
-                "total_duration": int(time.time() * 1e9),
-                "prompt_eval_count": len(inputs["input_ids"][0]),
-                "eval_count": len(self.current_tokenizer.encode(generated_text))
-            }
-            
-            yield json.dumps(final_response) + "\n"
-            
-        except Exception as e:
-            logger.error(f"Error en generación: {str(e)}")
-            error_response = {
-                "error": str(e),
-                "done": True
-            }
-            yield json.dumps(error_response) + "\n"
-        
-        finally:
-            thread.join()
-    
-    async def chat_stream(self, messages: List[ChatMessage], 
-                         options: Dict[str, Any] = None) -> AsyncGenerator[str, None]:
-        """Chat en streaming (convierte mensajes a prompt)"""
-        # Convertir mensajes a prompt
-        prompt = self._messages_to_prompt(messages)
-        
-        # Usar el generador estándar
-        async for chunk in self.generate_stream(prompt, options=options):
-            # Modificar formato para chat
-            data = json.loads(chunk)
-            if "response" in data and not data.get("done", False):
-                data["message"] = {
-                    "role": "assistant",
-                    "content": data.get("response", "")
-                }
-            yield json.dumps(data) + "\n"
-    
-    def _messages_to_prompt(self, messages: List[ChatMessage]) -> str:
-        """Convierte mensajes de chat en un prompt"""
-        # Formato simple, se puede mejorar según el modelo
-        prompt = ""
-        for msg in messages:
-            if msg.role == "system":
-                prompt += f"System: {msg.content}\n\n"
-            elif msg.role == "user":
-                prompt += f"User: {msg.content}\n\n"
-            elif msg.role == "assistant":
-                prompt += f"Assistant: {msg.content}\n\n"
-        
-        prompt += "Assistant: "
-        return prompt
+
+# Alias para compatibilidad
+OllamaCompatServer = OllamaCompactServer
 
 # ================== Aplicación FastAPI ==================
 

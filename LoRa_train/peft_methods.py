@@ -16,8 +16,9 @@ logger = logging.getLogger(__name__)
 
 from .peft_methods_config import (
     PEFTMethod, BasePEFTConfig, MoLoRAConfig, GaLoreConfig, 
-    DoRAConfig, AdaLoRAConfig, BitFitConfig, IA3Config, 
-    PromptTuningConfig, AdapterConfig
+    DoRAConfig, BitFitConfig, IA3Config, 
+    PromptTuningConfig, AdapterConfig, QLoRAConfig, LoRAConfig,
+    CompacterConfig, KronAConfig, S4Config, HoulsbyConfig
 )
 
 
@@ -76,6 +77,7 @@ class MoLoRALinear(BasePEFTModule):
         self.in_features = in_features
         self.out_features = out_features
         self.config = config
+        self.num_experts = config.num_experts
         
         # Peso base (congelado)
         self.weight = nn.Parameter(torch.randn(out_features, in_features))
@@ -106,17 +108,29 @@ class MoLoRALinear(BasePEFTModule):
         # Router decision
         router_weights, router_indices = self.router(x)
         
-        # Aplicar expertos
-        batch_size, seq_len, hidden = x.shape
-        x_flat = x.view(-1, hidden)
+        # Manejar diferentes dimensiones de entrada
+        if x.dim() == 2:
+            # Input 2D: (batch_size, features)
+            batch_size, hidden = x.shape
+            x_flat = x
+            out_flat = out
+        else:
+            # Input 3D: (batch_size, seq_len, features)
+            batch_size, seq_len, hidden = x.shape
+            x_flat = x.view(-1, hidden)
+            out_flat = out.view(-1, self.out_features)
         
         # Para cada experto seleccionado
         for i in range(2):  # Top-2
-            expert_out = torch.zeros_like(out).view(-1, self.out_features)
+            expert_out = torch.zeros_like(out_flat)
             
             for expert_idx in range(self.config.num_experts):
                 # Máscara para este experto
-                mask = (router_indices[..., i] == expert_idx).view(-1)
+                if x.dim() == 2:
+                    mask = (router_indices[..., i] == expert_idx)
+                else:
+                    mask = (router_indices[..., i] == expert_idx).view(-1)
+                
                 if mask.any():
                     expert_input = x_flat[mask]
                     
@@ -126,10 +140,17 @@ class MoLoRALinear(BasePEFTModule):
                     )
                     
                     # Ponderar por router
-                    weight = router_weights[..., i].view(-1)[mask].unsqueeze(-1)
+                    if x.dim() == 2:
+                        weight = router_weights[..., i][mask].unsqueeze(-1)
+                    else:
+                        weight = router_weights[..., i].view(-1)[mask].unsqueeze(-1)
+                    
                     expert_out[mask] += lora_out * weight * self.config.lora_alpha
             
-            out = out + expert_out.view(batch_size, seq_len, -1)
+            if x.dim() == 2:
+                out = out + expert_out
+            else:
+                out = out + expert_out.view(batch_size, seq_len, -1)
         
         return out
     
@@ -243,6 +264,9 @@ class DoRALinear(BasePEFTModule):
         self.lora_A = nn.Parameter(torch.randn(config.r, in_features))
         self.lora_B = nn.Parameter(torch.zeros(out_features, config.r))
         
+        # Escala DoRA
+        self.dora_scale = nn.Parameter(torch.ones(1))
+        
         # Dropout
         self.dropout = nn.Dropout(config.lora_dropout)
         
@@ -289,99 +313,7 @@ class DoRALinear(BasePEFTModule):
 
 
 # ============= AdaLoRA (Adaptive LoRA) =============
-
-class AdaLoRALinear(BasePEFTModule):
-    """AdaLoRA: LoRA con asignación adaptativa de rangos"""
-    
-    def __init__(self, in_features: int, out_features: int, config: 'AdaLoRAConfig'):
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.config = config
-        
-        # Peso base
-        self.weight = nn.Parameter(torch.randn(out_features, in_features))
-        self.weight.requires_grad = False
-        
-        # Matrices LoRA con rango máximo inicial
-        self.lora_E = nn.Parameter(torch.randn(config.init_r, in_features))
-        self.lora_A = nn.Parameter(torch.randn(config.init_r, in_features))
-        self.lora_B = nn.Parameter(torch.zeros(out_features, config.init_r))
-        
-        # Máscaras para poda de rangos
-        self.rank_mask = nn.Parameter(torch.ones(config.init_r), requires_grad=False)
-        
-        # Importancia de rangos
-        self.rank_importance = nn.Parameter(torch.ones(config.init_r), requires_grad=False)
-        
-        # Inicialización
-        nn.init.orthogonal_(self.lora_E)
-        nn.init.zeros_(self.lora_A)
-        nn.init.zeros_(self.lora_B)
-    
-    def update_rank_importance(self, step: int):
-        """Actualiza importancia de rangos basado en gradientes"""
-        if not self.training:
-            return
-        
-        # Calcular importancia basada en magnitud de gradientes
-        if self.lora_A.grad is not None and self.lora_B.grad is not None:
-            importance = (self.lora_A.grad.norm(dim=1) + self.lora_B.grad.norm(dim=0)) / 2
-            
-            # Actualizar con momentum
-            self.rank_importance.data = (
-                self.config.beta1 * self.rank_importance.data +
-                (1 - self.config.beta1) * importance
-            )
-    
-    def prune_ranks(self, step: int):
-        """Poda rangos menos importantes"""
-        if step < self.config.tinit:
-            return
-        
-        # Calcular número de rangos a mantener
-        progress = min((step - self.config.tinit) / (self.config.tfinal - self.config.tinit), 1.0)
-        current_r = int(self.config.init_r - progress * (self.config.init_r - self.config.target_r))
-        
-        # Seleccionar rangos más importantes
-        _, indices = torch.topk(self.rank_importance, current_r)
-        
-        # Actualizar máscara
-        self.rank_mask.zero_()
-        self.rank_mask[indices] = 1.0
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Forward base
-        out = F.linear(x, self.weight)
-        
-        # Aplicar AdaLoRA con máscara
-        masked_A = self.lora_A * self.rank_mask.unsqueeze(1)
-        masked_B = self.lora_B * self.rank_mask.unsqueeze(0)
-        
-        # P @ A @ B donde P = E
-        lora_out = F.linear(
-            F.linear(x, masked_A),
-            masked_B.T
-        )
-        
-        # Regularización ortogonal en E
-        if self.training:
-            orth_loss = torch.norm(
-                self.lora_E @ self.lora_E.T - torch.eye(self.config.init_r, device=x.device)
-            )
-            # Agregar a loss (manejado externamente)
-            self.orth_loss = orth_loss * self.config.orth_reg_weight
-        
-        return out + lora_out * self.config.lora_alpha
-    
-    def merge_weights(self):
-        with torch.no_grad():
-            # Solo fusionar rangos activos
-            active_indices = self.rank_mask.nonzero().squeeze()
-            if len(active_indices) > 0:
-                active_A = self.lora_A[active_indices]
-                active_B = self.lora_B[:, active_indices]
-                self.weight += active_B @ active_A * self.config.lora_alpha
+# AdaLoRA ha sido eliminado de esta implementación
 
 
 # ============= BitFit =============
@@ -472,6 +404,165 @@ class IA3Linear(BasePEFTModule):
                 self.base_layer.weight.mul_(self.ia3_weights.unsqueeze(0))
 
 
+# ============= Quantized LoRA =============
+
+class QuantizedLoRALinear(BasePEFTModule):
+    """LoRA con cuantización de pesos"""
+    
+    def __init__(self, in_features: int, out_features: int, config: 'QLoRAConfig'):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.config = config
+        
+        # Peso base (congelado)
+        self.weight = nn.Parameter(torch.randn(out_features, in_features))
+        self.weight.requires_grad = False
+        
+        # Matrices LoRA
+        self.lora_A = nn.Parameter(torch.randn(config.r, in_features))
+        self.lora_B = nn.Parameter(torch.zeros(out_features, config.r))
+        
+        # Dropout
+        self.dropout = nn.Dropout(config.lora_dropout)
+        
+        # Parámetros de cuantización
+        self.bits = config.bits
+        self.scale = None
+        self.zero_point = None
+        
+        # Inicialización
+        nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+        nn.init.zeros_(self.lora_B)
+    
+    def _quantize_weight(self, weight: torch.Tensor) -> torch.Tensor:
+        """Cuantiza el peso a bits específicos"""
+        if self.bits == 4:
+            # Cuantización a 4 bits
+            min_val = weight.min()
+            max_val = weight.max()
+            scale = (max_val - min_val) / (2**4 - 1)
+            zero_point = min_val
+            
+            # Cuantizar
+            quantized = torch.round((weight - zero_point) / scale)
+            quantized = torch.clamp(quantized, 0, 2**4 - 1)
+            
+            # Devolver a float
+            return quantized * scale + zero_point
+        else:
+            # Para otros bits, usar cuantización estándar
+            return torch.quantize_per_tensor(weight, scale=1.0, zero_point=0, dtype=torch.qint8).dequantize()
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Forward base
+        out = F.linear(x, self.weight)
+        
+        # Cuantizar LoRA weights
+        quantized_A = self._quantize_weight(self.lora_A)
+        quantized_B = self._quantize_weight(self.lora_B)
+        
+        # Aplicar LoRA cuantizado
+        lora_out = F.linear(
+            self.dropout(F.linear(x, quantized_A)),
+            quantized_B
+        )
+        
+        return out + lora_out * (self.config.lora_alpha / self.config.r)
+    
+    def merge_weights(self):
+        with torch.no_grad():
+            # Fusionar LoRA cuantizado
+            quantized_A = self._quantize_weight(self.lora_A)
+            quantized_B = self._quantize_weight(self.lora_B)
+            self.weight += quantized_B @ quantized_A * (self.config.lora_alpha / self.config.r)
+
+
+# ============= Pruned LoRA =============
+
+class PrunedLoRALinear(BasePEFTModule):
+    """LoRA con poda de pesos"""
+    
+    def __init__(self, in_features: int, out_features: int, config: 'LoRAConfig'):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.config = config
+        
+        # Peso base (congelado)
+        self.weight = nn.Parameter(torch.randn(out_features, in_features))
+        self.weight.requires_grad = False
+        
+        # Matrices LoRA
+        self.lora_A = nn.Parameter(torch.randn(config.r, in_features))
+        self.lora_B = nn.Parameter(torch.zeros(out_features, config.r))
+        
+        # Dropout
+        self.dropout = nn.Dropout(config.lora_dropout)
+        
+        # Máscaras de poda
+        self.A_mask = nn.Parameter(torch.ones_like(self.lora_A), requires_grad=False)
+        self.B_mask = nn.Parameter(torch.ones_like(self.lora_B), requires_grad=False)
+        
+        # Umbral de poda
+        self.pruning_threshold = 0.01
+        
+        # Inicialización
+        nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+        nn.init.zeros_(self.lora_B)
+    
+    def _update_masks(self):
+        """Actualiza máscaras de poda basado en magnitud de pesos"""
+        # Poda por magnitud
+        A_magnitude = torch.abs(self.lora_A)
+        B_magnitude = torch.abs(self.lora_B)
+        
+        # Crear máscaras
+        self.A_mask.data = (A_magnitude > self.pruning_threshold).float()
+        self.B_mask.data = (B_magnitude > self.pruning_threshold).float()
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Forward base
+        out = F.linear(x, self.weight)
+        
+        # Aplicar máscaras de poda
+        masked_A = self.lora_A * self.A_mask
+        masked_B = self.lora_B * self.B_mask
+        
+        # Aplicar LoRA podado
+        lora_out = F.linear(
+            self.dropout(F.linear(x, masked_A)),
+            masked_B
+        )
+        
+        return out + lora_out * (self.config.lora_alpha / self.config.r)
+    
+    def prune_weights(self, threshold: float = None):
+        """Ejecuta poda de pesos"""
+        if threshold is not None:
+            self.pruning_threshold = threshold
+        
+        self._update_masks()
+        
+        # Contar parámetros activos
+        active_A = self.A_mask.sum().item()
+        active_B = self.B_mask.sum().item()
+        total_A = self.A_mask.numel()
+        total_B = self.B_mask.numel()
+        
+        sparsity_A = 1 - (active_A / total_A)
+        sparsity_B = 1 - (active_B / total_B)
+        
+        logger.info(f"Poda completada - Sparsity A: {sparsity_A:.2%}, Sparsity B: {sparsity_B:.2%}")
+    
+    def merge_weights(self):
+        with torch.no_grad():
+            # Fusionar LoRA podado
+            masked_A = self.lora_A * self.A_mask
+            masked_B = self.lora_B * self.B_mask
+            self.weight += masked_B @ masked_A * (self.config.lora_alpha / self.config.r)
+
+
 # ============= Prompt Tuning =============
 
 class PromptEncoder(nn.Module):
@@ -515,19 +606,258 @@ class PromptEncoder(nn.Module):
         return prompt_embeds
 
 
-# ============= Adapter =============
+# ============= Compacter =============
 
-class Adapter(nn.Module):
-    """Módulo adapter (bottleneck)"""
+class CompacterLinear(BasePEFTModule):
+    """Compacter: Adapter con compresión de parámetros usando factorización de bajo rango"""
     
-    def __init__(self, input_size: int, adapter_size: int, config: 'AdapterConfig'):
+    def __init__(self, in_features: int, out_features: int, config: 'CompacterConfig'):
         super().__init__()
-        self.input_size = input_size
+        self.in_features = in_features
+        self.out_features = out_features
+        self.config = config
+        
+        # Peso base (congelado)
+        self.weight = nn.Parameter(torch.randn(out_features, in_features))
+        self.weight.requires_grad = False
+        
+        # Compacter: simplified version using a single low-rank matrix
+        self.compacter_weight = nn.Parameter(torch.randn(out_features, in_features))
+        
+        # Dropout
+        self.dropout = nn.Dropout(config.dropout)
+        
+        # Layer norm
+        self.layer_norm = nn.LayerNorm(out_features)
+        
+        # Scaling factor
+        self.scaling = config.scaling
+        
+        # Inicialización
+        self._init_weights()
+    
+    def _init_weights(self):
+        # Inicialización Xavier
+        nn.init.xavier_uniform_(self.compacter_weight)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Forward base
+        out = F.linear(x, self.weight)
+        
+        # Compacter forward: simplified version
+        compacter_out = F.linear(x, self.compacter_weight)
+        
+        # Apply dropout and scaling
+        compacter_out = self.dropout(compacter_out) * self.scaling
+        
+        # Residual connection
+        out = out + compacter_out
+        
+        # Layer norm
+        out = self.layer_norm(out)
+        
+        return out
+    
+    def merge_weights(self):
+        with torch.no_grad():
+            # Fusionar: W + compacter_weight
+            self.weight += self.compacter_weight * self.scaling
+
+
+# ============= KronA (Kronecker Adapter) =============
+
+class KronALinear(BasePEFTModule):
+    """KronA: Adapter usando productos de Kronecker para eficiencia de parámetros"""
+    
+    def __init__(self, in_features: int, out_features: int, config: 'KronAConfig'):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.config = config
+        
+        # Peso base (congelado)
+        self.weight = nn.Parameter(torch.randn(out_features, in_features))
+        self.weight.requires_grad = False
+        
+        # KronA: simplified version using a single adapter weight
+        self.krona_weight = nn.Parameter(torch.randn(out_features, in_features))
+        
+        # Dropout
+        self.dropout = nn.Dropout(config.dropout)
+        
+        # Scaling factor
+        self.scaling = config.scaling
+        
+        # Inicialización
+        self._init_weights()
+    
+    def _init_weights(self):
+        # Inicialización Xavier
+        nn.init.xavier_uniform_(self.krona_weight)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Forward base
+        out = F.linear(x, self.weight)
+        
+        # KronA forward: simplified version
+        kron_out = F.linear(x, self.krona_weight)
+        
+        # Apply dropout and scaling
+        kron_out = self.dropout(kron_out) * self.scaling
+        
+        # Residual connection
+        out = out + kron_out
+        
+        return out
+    
+    def merge_weights(self):
+        with torch.no_grad():
+            # Fusionar: W + krona_weight
+            self.weight += self.krona_weight * self.scaling
+
+
+# ============= S4 Adapter =============
+
+class S4Adapter(BasePEFTModule):
+    """S4 Adapter: Adapter basado en modelos de estado espacial"""
+    
+    def __init__(self, in_features: int, out_features: int, config: 'S4Config'):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.config = config
+        
+        # Peso base (congelado)
+        self.weight = nn.Parameter(torch.randn(out_features, in_features))
+        self.weight.requires_grad = False
+        
+        # S4: simplified version using a single adapter weight
+        self.s4_weight = nn.Parameter(torch.randn(out_features, in_features))
+        
+        # Dropout
+        self.dropout = nn.Dropout(config.dropout)
+        
+        # Layer norm
+        self.layer_norm = nn.LayerNorm(out_features)
+        
+        # Scaling factor
+        self.scaling = config.scaling
+        
+        # Inicialización
+        self._init_weights()
+    
+    def _init_weights(self):
+        # Inicialización Xavier
+        nn.init.xavier_uniform_(self.s4_weight)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Forward base
+        out = F.linear(x, self.weight)
+        
+        # S4 forward: simplified version
+        s4_out = F.linear(x, self.s4_weight)
+        
+        # Apply dropout and scaling
+        s4_out = self.dropout(s4_out) * self.scaling
+        
+        # Residual connection
+        out = out + s4_out
+        
+        # Layer norm
+        out = self.layer_norm(out)
+        
+        return out
+    
+    def merge_weights(self):
+        with torch.no_grad():
+            # Fusionar: W + s4_weight
+            self.weight += self.s4_weight * self.scaling
+
+
+class S4Layer(nn.Module):
+    """Capa S4 simplificada para el adaptador"""
+    
+    def __init__(self, d_model: int, d_state: int, d_conv: int, expand: int = 2):
+        super().__init__()
+        self.d_model = d_model
+        self.d_state = d_state
+        self.d_conv = d_conv
+        self.expand = expand
+        
+        # Simplified S4: just use a simple linear transformation
+        self.projection = nn.Linear(d_model, d_model)
+        
+        # Convolution kernel
+        self.conv_kernel = nn.Parameter(torch.randn(d_conv))
+        
+        # Initialization
+        self._init_weights()
+    
+    def _init_weights(self):
+        nn.init.normal_(self.conv_kernel, std=0.1)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (batch, seq_len, d_model)
+        # Simplified S4: just apply linear transformation
+        x = self.projection(x)
+        
+        return x
+
+
+# ============= Houlsby Adapter =============
+
+class HoulsbyAdapterLinear(BasePEFTModule):
+    """Houlsby Adapter: Adaptadores antes y después de la capa"""
+    
+    def __init__(self, in_features: int, out_features: int, config: 'HoulsbyConfig'):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.config = config
+        
+        # Peso base (congelado)
+        self.weight = nn.Parameter(torch.randn(out_features, in_features))
+        self.weight.requires_grad = False
+        
+        # Houlsby adapters: antes y después de la capa
+        self.adapter_pre = AdapterLayer(in_features, config.adapter_size, config)
+        self.adapter_post = AdapterLayer(out_features, config.adapter_size, config)
+        
+        # Inicialización
+        self._init_weights()
+    
+    def _init_weights(self):
+        # Los adaptadores se inicializan internamente
+        pass
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Adapter pre
+        x = self.adapter_pre(x)
+        
+        # Forward base
+        out = F.linear(x, self.weight)
+        
+        # Adapter post
+        out = self.adapter_post(out)
+        
+        return out
+    
+    def merge_weights(self):
+        # Houlsby adapters no se fusionan típicamente
+        logger.warning("Houlsby adapter merge not implemented - keeping separate modules")
+
+
+class AdapterLayer(nn.Module):
+    """Capa de adaptador individual para Houlsby"""
+    
+    def __init__(self, hidden_size: int, adapter_size: int, config: 'HoulsbyConfig'):
+        super().__init__()
+        self.hidden_size = hidden_size
         self.adapter_size = adapter_size
         self.config = config
         
         # Down-projection
-        self.down_proj = nn.Linear(input_size, adapter_size)
+        self.down_proj = nn.Linear(hidden_size, adapter_size)
         
         # Non-linearity
         if config.non_linearity == "relu":
@@ -538,27 +868,24 @@ class Adapter(nn.Module):
             self.activation = nn.SiLU()
         
         # Up-projection
-        self.up_proj = nn.Linear(adapter_size, input_size)
+        self.up_proj = nn.Linear(adapter_size, hidden_size)
         
         # Dropout
-        self.dropout = nn.Dropout(config.adapter_dropout)
+        self.dropout = nn.Dropout(config.dropout)
         
         # Layer norm
-        self.layer_norm = nn.LayerNorm(input_size)
+        self.layer_norm = nn.LayerNorm(hidden_size)
+        
+        # Scaling factor
+        self.scaling = config.scaling
         
         # Inicialización
         self._init_weights()
     
     def _init_weights(self):
-        if self.config.init_weights == "bert":
-            # Inicialización estilo BERT
-            nn.init.normal_(self.down_proj.weight, std=0.02)
-            nn.init.normal_(self.up_proj.weight, std=0.02)
-        elif self.config.init_weights == "xavier":
-            nn.init.xavier_uniform_(self.down_proj.weight)
-            nn.init.xavier_uniform_(self.up_proj.weight)
-        
-        # Bias a cero
+        # Inicialización estilo BERT
+        nn.init.normal_(self.down_proj.weight, std=0.02)
+        nn.init.normal_(self.up_proj.weight, std=0.02)
         nn.init.zeros_(self.down_proj.bias)
         nn.init.zeros_(self.up_proj.bias)
     
@@ -572,7 +899,7 @@ class Adapter(nn.Module):
         x = self.up_proj(x)
         
         # Residual connection con scaling
-        x = residual + x * self.config.scaling
+        x = residual + x * self.scaling
         
         # Layer norm
         x = self.layer_norm(x)
@@ -580,44 +907,67 @@ class Adapter(nn.Module):
         return x
 
 
-class AdapterLayer(nn.Module):
-    """Wrapper para insertar adapters en una capa"""
+# ============= Adapter =============
+
+class AdapterLinear(BasePEFTModule):
+    """Capa Linear con Adapter (bottleneck)"""
     
-    def __init__(self, base_layer: nn.Module, adapter_size: int, 
-                 config: 'AdapterConfig', adapter_type: str = "pfeiffer"):
+    def __init__(self, in_features: int, out_features: int, config: 'AdapterConfig'):
         super().__init__()
-        self.base_layer = base_layer
-        self.adapter_type = adapter_type
+        self.in_features = in_features
+        self.out_features = out_features
+        self.config = config
         
-        # Obtener tamaño de hidden
-        if hasattr(base_layer, 'out_features'):
-            hidden_size = base_layer.out_features
-        elif hasattr(base_layer, 'normalized_shape'):
-            hidden_size = base_layer.normalized_shape[0]
+        # Peso base (congelado)
+        self.weight = nn.Parameter(torch.randn(out_features, in_features))
+        self.weight.requires_grad = False
+        
+        # Adapter layers
+        self.adapter_down = nn.Linear(in_features, config.adapter_size)
+        self.adapter_up = nn.Linear(config.adapter_size, out_features)
+        
+        # Activation
+        if hasattr(config, 'non_linearity') and config.non_linearity == "gelu":
+            self.activation = nn.GELU()
         else:
-            raise ValueError("No se puede determinar hidden_size")
+            self.activation = nn.ReLU()
         
-        # Crear adapter(s)
-        if adapter_type == "pfeiffer":
-            # Un adapter después de la capa
-            self.adapter = Adapter(hidden_size, adapter_size, config)
-        elif adapter_type == "houlsby":
-            # Dos adapters: antes y después
-            self.adapter_pre = Adapter(hidden_size, adapter_size, config)
-            self.adapter_post = Adapter(hidden_size, adapter_size, config)
+        # Dropout
+        self.dropout = nn.Dropout(getattr(config, 'adapter_dropout', 0.1))
+        
+        # Layer norm
+        self.layer_norm = nn.LayerNorm(out_features)
+        
+        # Scaling factor
+        self.scaling = getattr(config, 'scaling', 1.0)
+        
+        # Inicialización
+        self._init_weights()
     
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        if self.adapter_type == "houlsby":
-            x = self.adapter_pre(x)
+    def _init_weights(self):
+        # Inicialización estilo BERT
+        nn.init.normal_(self.adapter_down.weight, std=0.02)
+        nn.init.normal_(self.adapter_up.weight, std=0.02)
+        nn.init.zeros_(self.adapter_down.bias)
+        nn.init.zeros_(self.adapter_up.bias)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Forward base
+        out = F.linear(x, self.weight)
         
-        x = self.base_layer(x, *args, **kwargs)
+        # Adapter forward
+        adapter_out = self.adapter_down(x)
+        adapter_out = self.activation(adapter_out)
+        adapter_out = self.dropout(adapter_out)
+        adapter_out = self.adapter_up(adapter_out)
         
-        if self.adapter_type == "pfeiffer":
-            x = self.adapter(x)
-        elif self.adapter_type == "houlsby":
-            x = self.adapter_post(x)
+        # Residual connection
+        out = out + adapter_out * self.scaling
         
-        return x
+        # Layer norm
+        out = self.layer_norm(out)
+        
+        return out
     
     def merge_weights(self):
         # Los adapters no se fusionan típicamente
@@ -676,17 +1026,38 @@ def _replace_layers(model: nn.Module, config: 'BasePEFTConfig') -> None:
             new_module = DoRALinear(module.in_features, module.out_features, config)
             new_module.weight.data = module.weight.data.clone()
             
-        elif config.method == PEFTMethod.ADALORA and isinstance(module, nn.Linear):
-            new_module = AdaLoRALinear(module.in_features, module.out_features, config)
+        elif config.method == PEFTMethod.ADAPTER and isinstance(module, nn.Linear):
+            new_module = AdapterLinear(module.in_features, module.out_features, config)
+            new_module.weight.data = module.weight.data.clone()
+            
+        elif config.method == PEFTMethod.QLORA and isinstance(module, nn.Linear):
+            new_module = QuantizedLoRALinear(module.in_features, module.out_features, config)
+            new_module.weight.data = module.weight.data.clone()
+            
+        elif config.method == PEFTMethod.COMPACTER and isinstance(module, nn.Linear):
+            new_module = CompacterLinear(module.in_features, module.out_features, config)
+            new_module.weight.data = module.weight.data.clone()
+            
+        elif config.method == PEFTMethod.KRONA and isinstance(module, nn.Linear):
+            new_module = KronALinear(module.in_features, module.out_features, config)
+            new_module.weight.data = module.weight.data.clone()
+            
+        elif config.method == PEFTMethod.S4 and isinstance(module, nn.Linear):
+            new_module = S4Adapter(module.in_features, module.out_features, config)
+            new_module.weight.data = module.weight.data.clone()
+            
+        elif config.method == PEFTMethod.HOULSBY and isinstance(module, nn.Linear):
+            new_module = HoulsbyAdapterLinear(module.in_features, module.out_features, config)
             new_module.weight.data = module.weight.data.clone()
             
         elif config.method == PEFTMethod.IA3 and isinstance(module, nn.Linear):
             is_feedforward = any(ffn in name for ffn in config.feedforward_modules or [])
             new_module = IA3Linear(module, config, is_feedforward)
             
-        elif config.method == PEFTMethod.ADAPTER:
-            if any(layer_type in name for layer_type in config.adapter_layers or []):
-                new_module = AdapterLayer(module, config.adapter_size, config, config.adapter_type)
+        elif config.method == PEFTMethod.LORA and isinstance(module, nn.Linear):
+            # Para LoRA básico, usar PrunedLoRA como implementación
+            new_module = PrunedLoRALinear(module.in_features, module.out_features, config)
+            new_module.weight.data = module.weight.data.clone()
         else:
             continue
         

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Script interactivo para fine-tuning con múltiples métodos PEFT
-Soporta: LoRA, MoLoRA, GaLore, DoRA, AdaLoRA, BitFit, IA³, Prompt Tuning, Adapter, QLoRA
+Soporta: LoRA, MoLoRA, GaLore, DoRA, BitFit, IA³, Prompt Tuning, Adapter, QLoRA
 """
 import os
 import sys
@@ -23,7 +23,7 @@ from rich import print as rprint
 # Importar configuraciones PEFT
 from LoRa_train.peft_methods_config import (
     PEFTMethod, BasePEFTConfig, LoRAConfig, MoLoRAConfig, GaLoreConfig,
-    DoRAConfig, AdaLoRAConfig, BitFitConfig, IA3Config, PromptTuningConfig,
+    DoRAConfig, BitFitConfig, IA3Config, PromptTuningConfig,
     AdapterConfig, QLoRAConfig, PEFTPresets, get_config_by_name
 )
 
@@ -46,7 +46,7 @@ class PEFTFineTuneWizard:
         PEFTMethod.MOLORA: "🎭 MoLoRA - Mixture of LoRAs\n• Múltiples expertos\n• Multi-tarea/dominio\n• Ideal para: Modelos versátiles",
         PEFTMethod.GALORE: "🚀 GaLore - Gradient Low-Rank\n• Proyección de gradientes\n• Memoria ultra-baja\n• Ideal para: GPUs limitadas",
         PEFTMethod.DORA: "🎯 DoRA - Decomposed LoRA\n• Magnitud + Dirección\n• Mejor que LoRA\n• Ideal para: Máxima calidad",
-        PEFTMethod.ADALORA: "🔄 AdaLoRA - Adaptive LoRA\n• Rangos dinámicos\n• Auto-optimización\n• Ideal para: Sin tuning manual",
+
         PEFTMethod.BITFIT: "💡 BitFit - Bias Tuning\n• Solo bias (~0.1%)\n• Súper eficiente\n• Ideal para: Ajustes sutiles",
         PEFTMethod.IA3: "⚡ IA³ - Infused Adapter\n• Vectores de escala\n• 10x menos que LoRA\n• Ideal para: Máxima eficiencia",
         PEFTMethod.PROMPT_TUNING: "📝 Prompt Tuning\n• Tokens virtuales\n• < 0.01% parámetros\n• Ideal para: Modelos enormes",
@@ -106,7 +106,7 @@ class PEFTFineTuneWizard:
         [bold cyan]🚀 Asistente Universal de Fine-Tuning PEFT[/bold cyan]
         
         Este asistente soporta múltiples métodos de fine-tuning eficiente:
-        • LoRA, QLoRA, DoRA, AdaLoRA, MoLoRA
+        • LoRA, QLoRA, DoRA, MoLoRA
         • BitFit, IA³, Prompt Tuning, Adapter Tuning
         • GaLore (gradient projection)
         
@@ -154,7 +154,7 @@ class PEFTFineTuneWizard:
         console.print("\n[dim]Recomendaciones:[/dim]")
         console.print("[dim]• Nuevo en PEFT? → LoRA (1)[/dim]")
         console.print("[dim]• Memoria limitada? → BitFit (6) o QLoRA (10)[/dim]")
-        console.print("[dim]• Máxima calidad? → DoRA (4) o AdaLoRA (5)[/dim]")
+        console.print("[dim]• Máxima calidad? → DoRA (4) o MoLoRA (2)[/dim]")
         
         while True:
             choice = IntPrompt.ask("\nSelecciona método (1-10)", default=1)
@@ -308,15 +308,7 @@ class PEFTFineTuneWizard:
                 magnitude_lr_scale=FloatPrompt.ask("Escala LR magnitud", default=0.1)
             )
             
-        elif self.peft_method == PEFTMethod.ADALORA:
-            console.print("\n[cyan]Parámetros AdaLoRA:[/cyan]")
-            config = AdaLoRAConfig(
-                **base_kwargs,
-                init_r=IntPrompt.ask("Rango inicial", default=64),
-                target_r=IntPrompt.ask("Rango objetivo", default=16),
-                tinit=IntPrompt.ask("Pasos init", default=200),
-                tfinal=IntPrompt.ask("Pasos final", default=1000)
-            )
+
             
         elif self.peft_method == PEFTMethod.BITFIT:
             console.print("\n[cyan]Parámetros BitFit:[/cyan]")
@@ -553,10 +545,10 @@ class PEFTFineTuneWizard:
         console.print(f"  📁 {output_path}")
         
         # Información específica del método
-        if self.peft_method == PEFTMethod.ADALORA:
-            console.print(f"\n[cyan]Evolución de rangos:[/cyan]")
-            console.print(f"  • Rango inicial: {self.peft_config.init_r}")
-            console.print(f"  • Rango final: {results.get('final_rank', 'N/A')}")
+        if self.peft_method in [PEFTMethod.LORA, PEFTMethod.QLORA, PEFTMethod.DORA]:
+            console.print(f"\n[cyan]Información del método:[/cyan]")
+            console.print(f"  • Rango (r): {getattr(self.peft_config, 'r', 'N/A')}")
+            console.print(f"  • Alpha: {getattr(self.peft_config, 'lora_alpha', 'N/A')}")
         
         # Próximos pasos
         console.print("\n[cyan]Próximos pasos:[/cyan]")

@@ -8,6 +8,7 @@ from functools import lru_cache
 import numpy as np
 import logging
 from abc import ABC, abstractmethod
+import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
@@ -320,7 +321,9 @@ class LowRankApproximation(CompressionMethod):
         target_rank = int(min(m, n) * rank_ratio)
         compressed_params = target_rank * (m + n)
         
-        return 1 - (compressed_params / original_params)
+        # Asegurar que la compresión no sea negativa
+        compression_ratio = 1 - (compressed_params / original_params)
+        return max(0.0, compression_ratio)
 
 class AttentionPruning(CompressionMethod):
     """Poda de cabezas de atención optimizada"""
@@ -811,6 +814,134 @@ class BlockSparseMethod(CompressionMethod):
         # Los bloques típicamente comprimen un poco menos que poda individual
         return strength * 0.9
 
+class MPODecomposition(CompressionMethod):
+    """Matrix Product Operators - Descomposición tensorial avanzada"""
+    
+    def __init__(self):
+        if not TENSORLY_AVAILABLE:
+            raise ImportError("TensorLy es requerido para MPO. Instala con: pip install tensorly")
+    
+    def _factorize_dimension(self, dim: int) -> Tuple[int, int]:
+        """Factoriza una dimensión en dos factores cercanos"""
+        sqrt_dim = int(np.sqrt(dim))
+        for i in range(sqrt_dim, 0, -1):
+            if dim % i == 0:
+                return (i, dim // i)
+        return (1, dim)
+    
+    def compress(self, module: nn.Module, config: Dict[str, Any], 
+                device: torch.device) -> nn.Module:
+        """Aplica descomposición MPO al módulo"""
+        if not hasattr(module, 'weight'):
+            return module
+        
+        strength = config.get('strength', 0.5)
+        rank = config.get('rank', 8)
+        
+        try:
+            with torch.no_grad():
+                weight = module.weight.data
+                
+                # Verificar que las dimensiones sean compatibles con MPO
+                if len(weight.shape) != 2:
+                    logger.warning(f"MPO requiere matriz 2D, peso tiene forma {weight.shape}")
+                    return module
+                
+                out_features, in_features = weight.shape
+                
+                # Verificar que el rango sea válido
+                if rank > min(out_features, in_features):
+                    rank = min(out_features, in_features) // 2
+                    if rank < 1:
+                        rank = 1
+                
+                # Intentar reshape solo si las dimensiones son compatibles
+                try:
+                    # Calcular factores que dividan las dimensiones
+                    out_factors = self._factorize_dimension(out_features)
+                    in_factors = self._factorize_dimension(in_features)
+                    
+                    # Verificar que el reshape sea válido
+                    if out_factors[0] * out_factors[1] != out_features or in_factors[0] * in_factors[1] != in_features:
+                        logger.warning(f"Dimensiones no factorizables para MPO: {out_features}x{in_features}")
+                        # Fallback a SVD
+                        fallback = LowRankApproximation()
+                        return fallback.compress(module, config, device)
+                    
+                    # Reshape a tensor 4D para MPO
+                    weight_4d = weight.view(out_factors[0], out_factors[1], in_factors[0], in_factors[1])
+                    
+                    # Aplicar descomposición MPO
+                    decomposed = tl.decomposition.tensor_train(weight_4d, rank=rank)
+                    
+                    # Crear módulo comprimido
+                    compressed_module = MPOCompressedLinear(
+                        in_features=in_features,
+                        out_features=out_features,
+                        rank=rank,
+                        decomposed_weights=decomposed
+                    )
+                    
+                    return compressed_module
+                    
+                except RuntimeError as reshape_error:
+                    logger.warning(f"Error en reshape MPO: {reshape_error}")
+                    # Fallback a SVD
+                    fallback = LowRankApproximation()
+                    return fallback.compress(module, config, device)
+                    
+        except Exception as e:
+            logger.warning(f"MPO falló, usando aproximación de bajo rango: {e}")
+            # Fallback a SVD
+            fallback = LowRankApproximation()
+            return fallback.compress(module, config, device)
+    
+    def estimate_compression(self, module: nn.Module, config: Dict[str, Any]) -> float:
+        """Estima ratio de compresión MPO"""
+        if not hasattr(module, 'weight'):
+            return 0.0
+        
+        rank = config.get('rank', 8)
+        weight = module.weight
+        
+        # Calcular compresión teórica
+        original_params = weight.numel()
+        compressed_params = rank * rank * 2  # Aproximación
+        
+        return max(0.0, 1.0 - (compressed_params / original_params))
+
+
+class MPOCompressedLinear(nn.Module):
+    """Módulo lineal comprimido usando MPO"""
+    
+    def __init__(self, in_features: int, out_features: int, rank: int, decomposed_weights):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.rank = rank
+        self.decomposed_weights = decomposed_weights
+        
+        # Crear parámetros entrenables
+        self.register_buffer('compressed_weight', torch.tensor(0.0))
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass usando pesos descomprimidos"""
+        # Descomprimir pesos
+        weight = self._decompress_weights()
+        return F.linear(x, weight)
+    
+    def _decompress_weights(self) -> torch.Tensor:
+        """Descomprime pesos MPO a matriz original"""
+        try:
+            # Reconstruir tensor original
+            reconstructed = tl.decomposition.tensor_train_to_tensor(self.decomposed_weights)
+            return reconstructed.view(self.out_features, self.in_features)
+        except Exception as e:
+            logger.warning(f"Error descomprimiendo MPO: {e}")
+            # Fallback a pesos aleatorios
+            return torch.randn(self.out_features, self.in_features)
+
+
 # Funciones getter para todos los métodos
 def get_int8_quantization():
     return QuantizationMethod(bits=8)
@@ -840,7 +971,7 @@ def get_tensor_decomposition():
     return LowRankApproximation()
 
 def get_mpo():
-    return MPOCompression()
+    return MPODecomposition()
 
 def get_tucker():
     return TuckerDecomposition()

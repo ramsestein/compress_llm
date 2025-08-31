@@ -11,10 +11,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from LoRa_train.peft_methods_config import (
-    PEFTMethod, BasePEFTConfig, LoRAConfig, MoLoRAConfig, GaLoreConfig,
-    DoRAConfig, AdaLoRAConfig, BitFitConfig, IA3Config, PromptTuningConfig,
-    AdapterConfig, QLoRAConfig, PEFTPresets, get_config_by_name,
-    get_available_methods, get_available_presets, estimate_memory_usage
+    PEFTMethod, BasePEFTConfig, MoLoRAConfig, GaLoreConfig,
+    DoRAConfig, BitFitConfig, IA3Config, PromptTuningConfig,
+    AdapterConfig, QLoRAConfig, LoRAConfig, CompacterConfig,
+    KronAConfig, S4Config, HoulsbyConfig, PEFTPresets,
+    get_config_by_name, get_available_methods, get_available_presets,
+    estimate_memory_usage
 )
 
 
@@ -25,7 +27,7 @@ class TestPEFTMethodsConfig(unittest.TestCase):
         """Test para enum PEFTMethod"""
         # Verificar que todos los métodos están definidos
         expected_methods = [
-            'lora', 'molora', 'galore', 'dora', 'adalora',
+            'lora', 'molora', 'galore', 'dora',
             'bitfit', 'ia3', 'prompt_tuning', 'adapter', 'qlora'
         ]
         
@@ -143,31 +145,6 @@ class TestPEFTMethodsConfig(unittest.TestCase):
         self.assertEqual(config.lora_alpha, 32)
         self.assertEqual(config.lora_dropout, 0.1)
         self.assertEqual(config.magnitude_lr_scale, 0.1)
-        self.assertEqual(config.target_modules, ["attn.c_attn", "attn.c_proj"])
-    
-    def test_adalora_config(self):
-        """Test para AdaLoRAConfig"""
-        config = AdaLoRAConfig(
-            method=PEFTMethod.ADALORA,
-            init_r=64,
-            target_r=16,
-            tinit=200,
-            tfinal=1000,
-            deltaT=10,
-            beta1=0.85,
-            beta2=0.85,
-            target_modules=["attn.c_attn", "attn.c_proj"]
-        )
-        
-        # Verificar valores específicos de AdaLoRA
-        self.assertEqual(config.method, PEFTMethod.ADALORA)
-        self.assertEqual(config.init_r, 64)
-        self.assertEqual(config.target_r, 16)
-        self.assertEqual(config.tinit, 200)
-        self.assertEqual(config.tfinal, 1000)
-        self.assertEqual(config.deltaT, 10)
-        self.assertEqual(config.beta1, 0.85)
-        self.assertEqual(config.beta2, 0.85)
         self.assertEqual(config.target_modules, ["attn.c_attn", "attn.c_proj"])
     
     def test_bitfit_config(self):

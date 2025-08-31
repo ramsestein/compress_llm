@@ -28,6 +28,10 @@ class TestDatasetManager(unittest.TestCase):
         self.test_dataset_path = self.datasets_dir / "test_dataset.csv"
         self.create_test_dataset()
         
+        # Limpiar cache para evitar conflictos
+        cache_dir = self.test_dir / ".cache" / "datasets"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
     def tearDown(self):
         """Limpieza después de las pruebas"""
         shutil.rmtree(self.test_dir)
@@ -52,14 +56,14 @@ class TestDatasetManager(unittest.TestCase):
     
     def test_dataset_manager_initialization(self):
         """Test de inicialización del dataset manager"""
-        manager = OptimizedDatasetManager(self.datasets_dir)
+        manager = OptimizedDatasetManager(str(self.datasets_dir), str(self.test_dir / ".cache" / "datasets"))
         self.assertIsNotNone(manager)
         self.assertEqual(manager.datasets_dir, self.datasets_dir)
     
     def test_scan_datasets(self):
         """Test de escaneo de datasets"""
-        manager = OptimizedDatasetManager(self.datasets_dir)
-        datasets = manager.scan_datasets()
+        manager = OptimizedDatasetManager(str(self.datasets_dir), str(self.test_dir / ".cache" / "datasets"))
+        datasets = manager.scan_datasets(use_cache=False)
         
         self.assertIsInstance(datasets, list)
         self.assertGreater(len(datasets), 0)
@@ -70,11 +74,17 @@ class TestDatasetManager(unittest.TestCase):
     
     def test_dataset_configuration(self):
         """Test de configuración de dataset"""
-        manager = OptimizedDatasetManager(self.datasets_dir)
-        datasets = manager.scan_datasets()
+        manager = OptimizedDatasetManager(str(self.datasets_dir), str(self.test_dir / ".cache" / "datasets"))
+        datasets = manager.scan_datasets(use_cache=False)
         
-        # Encontrar nuestro dataset de prueba
-        test_dataset = next(d for d in datasets if d['name'] == 'test_dataset')
+        # Encontrar nuestro dataset de prueba de forma más robusta
+        test_dataset = None
+        for d in datasets:
+            if d['name'] == 'test_dataset':
+                test_dataset = d
+                break
+        
+        self.assertIsNotNone(test_dataset, "No se encontró el dataset de prueba")
         
         # Configurar dataset
         config = manager.configure_dataset_interactive(test_dataset)
@@ -85,9 +95,17 @@ class TestDatasetManager(unittest.TestCase):
     
     def test_dataset_loading(self):
         """Test de carga de dataset"""
-        manager = OptimizedDatasetManager(self.datasets_dir)
-        datasets = manager.scan_datasets()
-        test_dataset = next(d for d in datasets if d['name'] == 'test_dataset')
+        manager = OptimizedDatasetManager(str(self.datasets_dir), str(self.test_dir / ".cache" / "datasets"))
+        datasets = manager.scan_datasets(use_cache=False)
+        
+        # Encontrar nuestro dataset de prueba de forma más robusta
+        test_dataset = None
+        for d in datasets:
+            if d['name'] == 'test_dataset':
+                test_dataset = d
+                break
+        
+        self.assertIsNotNone(test_dataset, "No se encontró el dataset de prueba")
         
         config = manager.configure_dataset_interactive(test_dataset)
         loaded_dataset = manager.load_dataset(config)
@@ -97,9 +115,17 @@ class TestDatasetManager(unittest.TestCase):
     
     def test_dataset_validation(self):
         """Test de validación de dataset"""
-        manager = OptimizedDatasetManager(self.datasets_dir)
-        datasets = manager.scan_datasets()
-        test_dataset = next(d for d in datasets if d['name'] == 'test_dataset')
+        manager = OptimizedDatasetManager(str(self.datasets_dir), str(self.test_dir / ".cache" / "datasets"))
+        datasets = manager.scan_datasets(use_cache=False)
+        
+        # Encontrar nuestro dataset de prueba de forma más robusta
+        test_dataset = None
+        for d in datasets:
+            if d['name'] == 'test_dataset':
+                test_dataset = d
+                break
+        
+        self.assertIsNotNone(test_dataset, "No se encontró el dataset de prueba")
         
         # Verificar que el dataset tiene las columnas esperadas
         self.assertIn('detected_columns', test_dataset)

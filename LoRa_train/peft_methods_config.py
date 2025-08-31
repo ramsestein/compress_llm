@@ -14,12 +14,15 @@ class PEFTMethod(Enum):
     MOLORA = "molora"
     GALORE = "galore"
     DORA = "dora"
-    ADALORA = "adalora"
     BITFIT = "bitfit"
     IA3 = "ia3"
     PROMPT_TUNING = "prompt_tuning"
     ADAPTER = "adapter"
     QLORA = "qlora"
+    COMPACTER = "compacter"
+    KRONA = "krona"
+    S4 = "s4"
+    HOULSBY = "houlsby"
 
 
 @dataclass
@@ -40,6 +43,7 @@ class BasePEFTConfig:
     metric_for_best_model: str = "eval_loss"
     greater_is_better: bool = False
     seed: int = 42
+    target_modules: Optional[List[str]] = None
 
 
 @dataclass
@@ -49,11 +53,29 @@ class LoRAConfig(BasePEFTConfig):
     lora_alpha: int = 32
     lora_dropout: float = 0.1
     bias: str = "none"
+    task_type: str = "CAUSAL_LM"
     target_modules: Optional[List[str]] = None
     modules_to_save: Optional[List[str]] = None
     
     def __post_init__(self):
         self.method = PEFTMethod.LORA
+        if self.target_modules is None:
+            self.target_modules = ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj", "lm_head"]
+        if self.modules_to_save is None:
+            self.modules_to_save = ["embed_tokens", "lm_head"]
+    
+    def to_dict(self):
+        """Convierte la configuración a diccionario"""
+        return {
+            'r': self.r,
+            'lora_alpha': self.lora_alpha,
+            'lora_dropout': self.lora_dropout,
+            'bias': self.bias,
+            'task_type': self.task_type,
+            'target_modules': self.target_modules,
+            'modules_to_save': self.modules_to_save,
+            'method': self.method.value
+        }
 
 
 @dataclass
@@ -63,6 +85,8 @@ class MoLoRAConfig(BasePEFTConfig):
     expert_r: List[int] = None
     expert_alpha: List[int] = None
     expert_dropout: List[float] = None
+    router_type: str = "learned"
+    lora_alpha: int = 32
     target_modules: Optional[List[str]] = None
     
     def __post_init__(self):
@@ -80,6 +104,8 @@ class GaLoreConfig(BasePEFTConfig):
     """Configuración para GaLore (Gradient Low-Rank)"""
     rank: int = 128
     scale: float = 0.25
+    proj_type: str = "std"
+    update_proj_gap: int = 200
     target_modules: Optional[List[str]] = None
     
     def __post_init__(self):
@@ -93,26 +119,14 @@ class DoRAConfig(BasePEFTConfig):
     lora_alpha: int = 32
     lora_dropout: float = 0.1
     magnitude_lr_scale: float = 0.1
+    normalize_direction: bool = True
     target_modules: Optional[List[str]] = None
     
     def __post_init__(self):
         self.method = PEFTMethod.DORA
 
 
-@dataclass
-class AdaLoRAConfig(BasePEFTConfig):
-    """Configuración para AdaLoRA (Adaptive LoRA)"""
-    init_r: int = 64
-    target_r: int = 16
-    tinit: int = 200
-    tfinal: int = 1000
-    deltaT: int = 10
-    beta1: float = 0.85
-    beta2: float = 0.85
-    target_modules: Optional[List[str]] = None
-    
-    def __post_init__(self):
-        self.method = PEFTMethod.ADALORA
+# AdaLoRAConfig ha sido eliminado de esta implementación
 
 
 @dataclass
@@ -152,6 +166,7 @@ class AdapterConfig(BasePEFTConfig):
     """Configuración para Adapter Tuning"""
     adapter_size: int = 64
     adapter_type: str = "pfeiffer"
+    adapter_dropout: float = 0.1
     target_modules: Optional[List[str]] = None
     
     def __post_init__(self):
@@ -169,6 +184,57 @@ class QLoRAConfig(BasePEFTConfig):
     
     def __post_init__(self):
         self.method = PEFTMethod.QLORA
+
+
+@dataclass
+class CompacterConfig(BasePEFTConfig):
+    """Configuración para Compacter"""
+    rank: int = 8
+    dropout: float = 0.1
+    scaling: float = 1.0
+    target_modules: Optional[List[str]] = None
+    
+    def __post_init__(self):
+        self.method = PEFTMethod.COMPACTER
+
+
+@dataclass
+class KronAConfig(BasePEFTConfig):
+    """Configuración para KronA (Kronecker Adapter)"""
+    dropout: float = 0.1
+    scaling: float = 1.0
+    target_modules: Optional[List[str]] = None
+    
+    def __post_init__(self):
+        self.method = PEFTMethod.KRONA
+
+
+@dataclass
+class S4Config(BasePEFTConfig):
+    """Configuración para S4 Adapter"""
+    hidden_size: int = 128
+    state_size: int = 64
+    conv_size: int = 4
+    expand_factor: int = 2
+    dropout: float = 0.1
+    scaling: float = 1.0
+    target_modules: Optional[List[str]] = None
+    
+    def __post_init__(self):
+        self.method = PEFTMethod.S4
+
+
+@dataclass
+class HoulsbyConfig(BasePEFTConfig):
+    """Configuración para Houlsby Adapter"""
+    adapter_size: int = 64
+    dropout: float = 0.1
+    scaling: float = 1.0
+    non_linearity: str = "gelu"
+    target_modules: Optional[List[str]] = None
+    
+    def __post_init__(self):
+        self.method = PEFTMethod.HOULSBY
 
 
 # Presets predefinidos
@@ -227,13 +293,7 @@ PEFTPresets = {
             learning_rate=1e-4,
             num_train_epochs=5
         ),
-        "adalora": AdaLoRAConfig(
-            method=PEFTMethod.ADALORA,
-            init_r=128,
-            target_r=32,
-            learning_rate=1e-4,
-            num_train_epochs=5
-        ),
+        # AdaLoRA ha sido eliminado
         "molora": MoLoRAConfig(
             method=PEFTMethod.MOLORA,
             num_experts=8,
