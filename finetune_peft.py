@@ -46,12 +46,15 @@ class PEFTFineTuneWizard:
         PEFTMethod.MOLORA: "🎭 MoLoRA - Mixture of LoRAs\n• Múltiples expertos\n• Multi-tarea/dominio\n• Ideal para: Modelos versátiles",
         PEFTMethod.GALORE: "🚀 GaLore - Gradient Low-Rank\n• Proyección de gradientes\n• Memoria ultra-baja\n• Ideal para: GPUs limitadas",
         PEFTMethod.DORA: "🎯 DoRA - Decomposed LoRA\n• Magnitud + Dirección\n• Mejor que LoRA\n• Ideal para: Máxima calidad",
-
         PEFTMethod.BITFIT: "💡 BitFit - Bias Tuning\n• Solo bias (~0.1%)\n• Súper eficiente\n• Ideal para: Ajustes sutiles",
         PEFTMethod.IA3: "⚡ IA³ - Infused Adapter\n• Vectores de escala\n• 10x menos que LoRA\n• Ideal para: Máxima eficiencia",
         PEFTMethod.PROMPT_TUNING: "📝 Prompt Tuning\n• Tokens virtuales\n• < 0.01% parámetros\n• Ideal para: Modelos enormes",
         PEFTMethod.ADAPTER: "🧩 Adapter Tuning\n• Módulos bottleneck\n• Más expresivo\n• Ideal para: Cambios grandes",
-        PEFTMethod.QLORA: "🔥 QLoRA - Quantized LoRA\n• LoRA + 4-bit\n• 10x menos memoria\n• Ideal para: Modelos 65B+"
+        PEFTMethod.QLORA: "🔥 QLoRA - Quantized LoRA\n• LoRA + 4-bit\n• 10x menos memoria\n• Ideal para: Modelos 65B+",
+        PEFTMethod.COMPACTER: "🔧 Compacter - Compressed Adapters\n• Adapters comprimidos\n• Menos parámetros\n• Ideal para: Eficiencia extrema",
+        PEFTMethod.KRONA: "🔺 KronA - Kronecker Adapters\n• Descomposición Kronecker\n• Muy eficiente\n• Ideal para: Modelos grandes",
+        PEFTMethod.S4: "🔄 S4 - Structured State Space\n• Estado estructurado\n• Secuencias largas\n• Ideal para: Procesamiento secuencial",
+        PEFTMethod.HOULSBY: "🏗️ Houlsby - Adapter Layers\n• Capas adaptadoras\n• Arquitectura estándar\n• Ideal para: Casos generales"
     }
     
     def __init__(self, models_dir: str = "./models", datasets_dir: str = "./datasets",
@@ -79,10 +82,13 @@ class PEFTFineTuneWizard:
             # Paso 2: Seleccionar modelo
             self.model_name = self._select_model()
             
-            # Paso 3: Seleccionar datasets
+            # Paso 3: Seleccionar tipo de aprendizaje
+            self.learning_type = self._select_learning_type()
+            
+            # Paso 4: Seleccionar datasets
             self.selected_datasets = self._select_and_configure_datasets()
             
-            # Paso 4: Configurar método PEFT
+            # Paso 5: Configurar método PEFT
             self.peft_config = self._configure_peft_method()
             
             # Paso 5: Revisar y confirmar
@@ -206,11 +212,32 @@ class PEFTFineTuneWizard:
                 return models[choice - 1]['name']
             console.print("[red]Opción inválida[/red]")
     
+    def _select_learning_type(self) -> str:
+        """Selecciona el tipo de aprendizaje"""
+        console.print("\n[bold]🎯 Tipo de aprendizaje:[/bold]")
+        console.print("  [1] Supervisado (input → output)")
+        console.print("  [2] Instrucción (instruction → response)")
+        console.print("  [3] Traducción (source → target)")
+        console.print("  [4] Personalizado")
+        
+        while True:
+            choice = IntPrompt.ask("Tipo de aprendizaje", default=1)
+            if choice == 1:
+                return "supervised"
+            elif choice == 2:
+                return "instruction"
+            elif choice == 3:
+                return "translation"
+            elif choice == 4:
+                return "custom"
+            else:
+                console.print("[red]Opción inválida[/red]")
+    
     def _select_and_configure_datasets(self) -> List[DatasetConfig]:
         """Selecciona y configura datasets"""
         console.print("\n[bold]📊 Configuración de datasets:[/bold]\n")
         
-        available = self.dataset_manager.scan_datasets()
+        available = self.dataset_manager.scan_datasets(use_cache=False)
         
         if not available:
             raise ValueError("No se encontraron datasets")
@@ -246,9 +273,11 @@ class PEFTFineTuneWizard:
             try:
                 idx = int(choice) - 1
                 if 0 <= idx < len(available):
-                    config = self.dataset_manager.configure_dataset_interactive(
-                        available[idx]
-                    )
+                    if self.learning_type == "supervised":
+                        config = self._configure_dataset_with_columns(available[idx])
+                    else:
+                        config = self._configure_dataset_simple(available[idx])
+                    
                     if config:
                         selected.append(config)
                         console.print(f"[green]✓ Agregado[/green]")
@@ -259,6 +288,365 @@ class PEFTFineTuneWizard:
             raise ValueError("Debes seleccionar al menos un dataset")
         
         return selected
+    
+    def _configure_dataset_simple(self, dataset_info: Dict[str, Any]) -> Optional[DatasetConfig]:
+        """Configura dataset para aprendizaje no supervisado"""
+        console.print(f"\n[bold]Configurando: {dataset_info['name']}[/bold]")
+        
+        # Crear configuración simple
+        from LoRa_train.dataset_manager import DatasetConfig
+        from pathlib import Path
+        
+        config = DatasetConfig(
+            file_path=Path(dataset_info['file_path']),
+            format=dataset_info['format'],
+            columns={},  # Sin mapeo de columnas específico
+            name=dataset_info.get('name', 'dataset'),
+            size=dataset_info.get('size', 0),
+            instruction_template="{text}",  # Template simple
+            dataset_type=self.learning_type,
+            delimiter=dataset_info.get('delimiter', ',')
+        )
+        
+        console.print(f"[green]✓ Configurado para {self.learning_type}[/green]")
+        return config
+    
+    def _configure_dataset_with_columns(self, dataset_info: Dict[str, Any]) -> Optional[DatasetConfig]:
+        """Configura dataset con entrada explícita de columnas"""
+        console.print(f"\n[bold]📋 Configurando: {dataset_info['name']}[/bold]")
+        
+        # Detectar formato automáticamente
+        try:
+            import pandas as pd
+            
+            # Analizar el archivo para detectar formato
+            df, detected_format = self._auto_detect_format(dataset_info['file_path'])
+            
+            if df is not None:
+                console.print(f"[green]✓ Formato detectado automáticamente: {detected_format}[/green]")
+                console.print(f"[green]✓ Columnas detectadas: {list(df.columns)}[/green]")
+                console.print(f"[dim]Muestra de datos (primeras 2 filas):[/dim]")
+                console.print(df.head(2).to_string())
+            else:
+                console.print(f"[yellow]No se pudo detectar el formato del dataset[/yellow]")
+                return None
+                
+        except Exception as e:
+            console.print(f"[yellow]Error analizando dataset: {e}[/yellow]")
+            return None
+        
+        # Detectar automáticamente las columnas de entrada y salida
+        console.print("\n[bold]🤖 Detección automática de columnas:[/bold]")
+        
+        # Buscar columnas comunes para traducción
+        input_col = None
+        output_col = None
+        
+        # Buscar columnas que contengan "catalan", "spanish", "source", "input"
+        for col in df.columns:
+            col_lower = col.lower()
+            if any(keyword in col_lower for keyword in ['catalan', 'spanish', 'source', 'input', 'text']):
+                input_col = col
+                break
+        
+        # Buscar columnas que contengan "chino", "chinese", "target", "output"
+        for col in df.columns:
+            col_lower = col.lower()
+            if any(keyword in col_lower for keyword in ['chino', 'chinese', 'target', 'output', 'translation']):
+                output_col = col
+                break
+        
+        # Si no se encontraron, usar las primeras dos columnas (excluyendo 'linea')
+        if not input_col or not output_col:
+            data_columns = [col for col in df.columns if col.lower() != 'linea']
+            if len(data_columns) >= 2:
+                input_col = data_columns[0]
+                output_col = data_columns[1]
+            else:
+                console.print(f"[red]No se pudieron detectar columnas válidas[/red]")
+                return None
+        
+        console.print(f"[green]✓ Columna de entrada detectada: {input_col}[/green]")
+        console.print(f"[green]✓ Columna de salida detectada: {output_col}[/green]")
+        
+        # Detectar automáticamente el tipo de template basado en las columnas
+        if 'catalan' in input_col.lower() and 'chino' in output_col.lower():
+            # Template de traducción
+            instruction_template = "Translate from Catalan to Chinese:\n{input}\n{output}"
+            console.print(f"[green]✓ Template detectado: Traducción (Catalan → Chinese)[/green]")
+        else:
+            # Template simple
+            instruction_template = "{input}\n{output}"
+            console.print(f"[green]✓ Template detectado: Simple[/green]")
+        
+        # Limpiar nombres de columnas (remover sufijos como ;;;)
+        input_col = input_col.strip().strip('"').rstrip(';;;')
+        output_col = output_col.strip().strip('"').rstrip(';;;')
+        
+        console.print(f"[green]✓ Configuración final: {input_col} → {output_col}[/green]")
+        
+        # Crear mapeo de columnas
+        columns_map = {input_col: "input", output_col: "output"}
+        
+        # Crear configuración
+        from LoRa_train.dataset_manager import DatasetConfig
+        from pathlib import Path
+        
+        # Determinar el separador detectado
+        detected_sep = ','
+        if ';;;' in detected_format:
+            detected_sep = ';;;'
+        elif 'Tab-separated' in detected_format:
+            detected_sep = '\t'
+        elif 'Pipe-separated' in detected_format:
+            detected_sep = '|'
+        
+        config = DatasetConfig(
+            file_path=Path(dataset_info['file_path']),
+            format='csv',  # Siempre CSV, pero con separador personalizado
+            columns=columns_map,
+            name=dataset_info.get('name', 'dataset'),
+            size=dataset_info.get('size', 0),
+            instruction_template=instruction_template,
+            dataset_type="supervised",
+            delimiter=detected_sep  # Usar el separador detectado
+        )
+        
+        # Añadir información de columnas para el procesamiento
+        config.input_column = input_col
+        config.output_column = output_col
+        config.detected_format = detected_format
+        
+        console.print(f"[green]✓ Configurado: {input_col} → {output_col}[/green]")
+        return config
+    
+    def _auto_detect_format(self, file_path: str) -> tuple:
+        """Detecta automáticamente el formato del dataset"""
+        import pandas as pd
+        import re
+        
+        # Leer las primeras líneas para análisis
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            first_lines = [f.readline().strip() for _ in range(5)]
+        
+        # Analizar la primera línea (header)
+        header = first_lines[0]
+        console.print(f"[blue]Header detectado: {repr(header)}[/blue]")
+        
+        # Detectar separadores comunes
+        separators = [',', ';', '\t', '|', ';;;', '|||']
+        best_sep = None
+        best_score = 0
+        
+        for sep in separators:
+            parts = header.split(sep)
+            if len(parts) > 1:
+                # Puntuar basado en número de columnas y consistencia
+                score = len(parts)
+                
+                # Verificar consistencia en las siguientes líneas (datos)
+                consistent_lines = 0
+                for line in first_lines[1:]:
+                    if line and len(line.split(sep)) == len(parts):
+                        consistent_lines += 1
+                
+                score += consistent_lines * 0.5
+                
+                if score > best_score:
+                    best_score = score
+                    best_sep = sep
+        
+        if not best_sep:
+            return None, "No se pudo detectar separador"
+        
+        console.print(f"[blue]Mejor separador detectado: {repr(best_sep)}[/blue]")
+        
+        # Intentar cargar con el mejor separador
+        try:
+            if best_sep in [';;;', '|||']:
+                # Para separadores personalizados, necesitamos un enfoque especial
+                # Leer el archivo línea por línea y procesar manualmente
+                df = self._parse_custom_csv(file_path, best_sep, nrows=5)
+            else:
+                # Separadores estándar
+                df = pd.read_csv(file_path, sep=best_sep, nrows=5, on_bad_lines='skip')
+            
+            # Limpiar nombres de columnas
+            df.columns = [col.strip().strip('"').rstrip(';;;') for col in df.columns]
+            console.print(f"[blue]Columnas detectadas: {list(df.columns)}[/blue]")
+            
+            # Verificar que tenemos columnas válidas (no solo números de línea)
+            valid_columns = []
+            for col in df.columns:
+                # Si la columna no es solo números, es probablemente una columna de datos
+                if not str(col).strip().isdigit() and str(col).strip() != 'linea':
+                    valid_columns.append(col)
+            
+            console.print(f"[blue]Columnas válidas para datos: {valid_columns}[/blue]")
+            
+            if len(valid_columns) < 2:
+                # Si no tenemos suficientes columnas válidas, intentar con diferentes configuraciones
+                console.print(f"[yellow]Advertencia: Solo se detectaron {len(valid_columns)} columnas válidas[/yellow]")
+            
+            # Detectar tipo de formato
+            format_type = "CSV estándar"
+            if best_sep == ';;;':
+                format_type = "CSV con separador personalizado (;;;)"
+            elif best_sep == '\t':
+                format_type = "TSV (Tab-separated)"
+            elif best_sep == '|':
+                format_type = "Pipe-separated"
+            
+            return df, format_type
+            
+        except Exception as e:
+            # Fallback: intentar con diferentes configuraciones
+            try:
+                df = pd.read_csv(file_path, sep=best_sep, quotechar='"', nrows=5, on_bad_lines='skip')
+                df.columns = [col.strip().strip('"').rstrip(';;;') for col in df.columns]
+                return df, f"CSV con comillas ({best_sep})"
+            except:
+                return None, f"Error: {str(e)}"
+    
+    def _parse_custom_csv(self, file_path: str, separator: str, nrows: int = None):
+        """Parsea CSV con separador personalizado como ;;; - maneja formatos mixtos"""
+        import pandas as pd
+        import csv
+        import io
+        import re
+        
+        rows = []
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for i, line in enumerate(f):
+                if nrows and i >= nrows:
+                    break
+                    
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Dividir por el separador personalizado
+                parts = line.split(separator)
+                if len(parts) < 2:
+                    continue
+                
+                # La primera parte contiene los datos CSV
+                csv_data = parts[0]
+                
+                # Para la primera línea (header), usar división simple
+                if i == 0:
+                    # Header: linea,catalan,chino
+                    row = csv_data.split(',')
+                else:
+                    # Detectar el formato de la línea de datos
+                    if csv_data.startswith('"') and csv_data.endswith('"'):
+                        # Formato con comillas: "558,""text1"",""text2"""
+                        row = self._parse_quoted_line(csv_data)
+                    else:
+                        # Formato simple: 31524,text1,text2
+                        row = csv_data.split(',')
+                
+                if row:
+                    rows.append(row)
+        
+        if not rows:
+            return pd.DataFrame()
+        
+        # Asegurar que todas las filas tengan el mismo número de columnas
+        header = rows[0]
+        num_cols = len(header)
+        
+        # Procesar las filas de datos
+        data_rows = []
+        for row in rows[1:]:
+            if len(row) == num_cols:
+                data_rows.append(row)
+            elif len(row) > num_cols:
+                # Si hay más columnas, tomar solo las primeras
+                data_rows.append(row[:num_cols])
+            else:
+                # Si hay menos columnas, rellenar con valores vacíos
+                padded_row = row + [''] * (num_cols - len(row))
+                data_rows.append(padded_row)
+        
+        # Crear DataFrame
+        df = pd.DataFrame(data_rows, columns=header)
+        
+        # Limpiar nombres de columnas - remover sufijos como ;;; y comillas
+        df.columns = [col.strip().strip('"').rstrip(';;;') for col in df.columns]
+        
+        return df
+    
+    def _parse_quoted_line(self, csv_data: str):
+        """Parsea una línea con formato de comillas complejo usando regex mejorado"""
+        import re
+        
+        # Remover las comillas exteriores
+        if csv_data.startswith('"') and csv_data.endswith('"'):
+            csv_data = csv_data[1:-1]
+        
+        # Patrón 1: número,""texto_con_comillas"",texto_chino
+        pattern1 = r'^(\d+),""([^"]*(?:""[^"]*)*)"",(.+)$'
+        match1 = re.match(pattern1, csv_data)
+        
+        if match1:
+            number = match1.group(1)
+            quoted_text = match1.group(2).replace('""', '"')
+            rest = match1.group(3)
+            return [number, quoted_text, rest]
+        
+        # Patrón 2: número,"texto_con_comillas",texto_chino
+        pattern2 = r'^(\d+),"([^"]*(?:\\.[^"]*)*)",(.+)$'
+        match2 = re.match(pattern2, csv_data)
+        
+        if match2:
+            number = match2.group(1)
+            quoted_text = match2.group(2)
+            rest = match2.group(3)
+            return [number, quoted_text, rest]
+        
+        # Patrón 3: número,texto_sin_comillas,texto_chino
+        pattern3 = r'^(\d+),([^,]+),(.+)$'
+        match3 = re.match(pattern3, csv_data)
+        
+        if match3:
+            number = match3.group(1)
+            text = match3.group(2)
+            rest = match3.group(3)
+            return [number, text, rest]
+        
+        # Fallback a división simple por comas
+        return csv_data.split(',')
+    
+    def _load_dataset_with_detected_format(self, dataset_config):
+        """Carga el dataset usando el formato detectado"""
+        import pandas as pd
+        
+        # Usar el separador detectado
+        delimiter = getattr(dataset_config, 'delimiter', ',')
+        
+        try:
+            if delimiter in [';;;', '|||']:
+                # Separadores personalizados - usar parser personalizado
+                df = self._parse_custom_csv(dataset_config.file_path, delimiter)
+            else:
+                # Separadores estándar
+                df = pd.read_csv(dataset_config.file_path, sep=delimiter, on_bad_lines='skip')
+            
+            # Limpiar nombres de columnas
+            df.columns = [col.strip().strip('"') for col in df.columns]
+            
+            return df
+            
+        except Exception as e:
+            console.print(f"[red]Error cargando dataset: {e}[/red]")
+            # Fallback: intentar con diferentes configuraciones
+            try:
+                df = pd.read_csv(dataset_config.file_path, sep=delimiter, quotechar='"', on_bad_lines='skip')
+                df.columns = [col.strip().strip('"') for col in df.columns]
+                return df
+            except:
+                raise e
     
     def _configure_peft_method(self) -> BasePEFTConfig:
         """Configura el método PEFT seleccionado"""
@@ -377,13 +765,29 @@ class PEFTFineTuneWizard:
         
         choice = Prompt.ask("Selección", choices=["1", "2", "3", "4"], default="2")
         
+        # Detectar nombres de capas según el modelo
+        if "distilgpt2" in self.model_name.lower() or "gpt2" in self.model_name.lower():
+            # GPT-2/DistilGPT-2 usa estos nombres
+            attention_modules = ["c_attn", "c_proj"]
+            ffn_modules = ["c_fc"]
+        elif "tinyllama" in self.model_name.lower() or "llama" in self.model_name.lower():
+            # TinyLlama/Llama usa estos nombres
+            attention_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
+            ffn_modules = ["gate_proj", "up_proj", "down_proj"]
+        else:
+            # Por defecto, usar nombres estándar
+            attention_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
+            ffn_modules = ["gate_proj", "up_proj", "down_proj"]
+        
         if choice == "1":
-            return ["q_proj", "v_proj", "k_proj", "o_proj"]
+            return attention_modules
         elif choice == "2":
-            return ["q_proj", "v_proj", "k_proj", "o_proj", 
-                   "gate_proj", "up_proj", "down_proj"]
+            return attention_modules + ffn_modules
         elif choice == "3":
-            return ["q_proj", "v_proj"]
+            if "tinyllama" in self.model_name.lower() or "llama" in self.model_name.lower():
+                return ["q_proj", "v_proj"]
+            else:
+                return ["c_attn"]
         else:
             # Personalizado
             modules = Prompt.ask("Módulos (separados por comas)")
@@ -491,8 +895,14 @@ class PEFTFineTuneWizard:
         # Preparar datos
         all_data = []
         for dataset_config in self.selected_datasets:
-            data = self.dataset_manager.load_dataset(dataset_config)
-            all_data.extend(data)
+            # Usar el formato detectado para cargar los datos
+            data = self._load_dataset_with_detected_format(dataset_config)
+            # Convertir DataFrame a lista de diccionarios
+            if hasattr(data, 'to_dict'):
+                data_list = data.to_dict('records')
+            else:
+                data_list = data
+            all_data.extend(data_list)
         
         console.print(f"[green]✓[/green] Cargados {len(all_data)} ejemplos")
         
@@ -506,6 +916,9 @@ class PEFTFineTuneWizard:
             output_dir=output_path,
             peft_config=self.peft_config
         )
+        
+        # Pasar las configuraciones de dataset al trainer
+        trainer.dataset_configs = self.selected_datasets
         
         # Entrenar
         try:

@@ -112,20 +112,37 @@ class CompressionEngine:
         logger = logging.getLogger(__name__)
         
         try:
-            compressed_model = model
+            # Crear una copia del modelo usando state_dict para evitar problemas con deepcopy
+            compressed_model = type(model)(model.config)
+            compressed_model.load_state_dict(model.state_dict())
+            compressed_model.eval()
             total_compression = 0.0
             
-            # Aplicar compresión por capas
-            for name, module in model.named_modules():
-                if name in config.get('layer_configs', {}):
-                    layer_config = config['layer_configs'][name]
+            # Aplicar compresión por capas en el modelo copiado
+            layer_configs = config.get('layer_configs', {})
+            
+            # Crear diccionario de módulos para poder reemplazarlos
+            modules_dict = dict(compressed_model.named_modules())
+            
+            for name, module in modules_dict.items():
+                # Solo procesar módulos que tengan pesos
+                if not hasattr(module, 'weight') or module.weight is None:
+                    continue
+                    
+                # Mapear nombres específicos a genéricos
+                layer_type = self._get_layer_type(name, module)
+                
+                if layer_type in layer_configs:
+                    layer_config = layer_configs[layer_type]
                     compressed_module, result = self.compress_layer(module, layer_config)
                     
-                    if result.success:
+                    if result.success and not torch.equal(module.weight, compressed_module.weight):
+                        # Reemplazar el módulo en el modelo
+                        self._replace_module_in_model(compressed_model, name, compressed_module)
                         total_compression += result.compression_ratio
-                        logger.info(f"✅ Capa {name} comprimida: {result.compression_ratio:.2%}")
+                        logger.info(f"✅ Capa {name} ({layer_type}) comprimida: {result.compression_ratio:.2%}")
                     else:
-                        logger.warning(f"⚠️ Fallo comprimiendo capa {name}: {result.error}")
+                        logger.warning(f"⚠️ Fallo comprimiendo capa {name} ({layer_type}): {result.error}")
             
             logger.info(f"🎯 Compresión total del modelo: {total_compression:.2%}")
             return compressed_model
@@ -133,6 +150,98 @@ class CompressionEngine:
         except Exception as e:
             logger.error(f"❌ Error comprimiendo modelo: {e}")
             return model
+
+    def _get_layer_type(self, name: str, module) -> str:
+        """Mapea nombres específicos de capas a tipos genéricos - UNIVERSAL"""
+        import torch.nn as nn
+        
+        # 1. EMBEDDINGS - Detectar por tipo de módulo y nombre
+        if isinstance(module, nn.Embedding):
+            return 'embedding'
+        elif 'embed' in name.lower() or 'token' in name.lower():
+            return 'embedding'
+        
+        # 2. ATTENTION - Detectar por nombre común y tipo
+        elif any(keyword in name.lower() for keyword in ['attn', 'attention', 'self_attn', 'cross_attn']):
+            return 'attention'
+        elif 'q_proj' in name or 'k_proj' in name or 'v_proj' in name or 'o_proj' in name:
+            return 'attention'
+        elif 'query' in name.lower() or 'key' in name.lower() or 'value' in name.lower():
+            return 'attention'
+        
+        # 3. FEED-FORWARD - Detectar por nombre común y tipo
+        elif any(keyword in name.lower() for keyword in ['mlp', 'ffn', 'feed_forward', 'fc']):
+            return 'ffn'
+        elif 'gate_proj' in name or 'up_proj' in name or 'down_proj' in name:
+            return 'ffn'
+        elif 'intermediate' in name.lower() or 'dense' in name.lower():
+            return 'ffn'
+        
+        # 4. OUTPUT LAYERS - Detectar por nombre común
+        elif any(keyword in name.lower() for keyword in ['lm_head', 'head', 'classifier', 'output']):
+            return 'output'
+        elif 'logits' in name.lower() or 'predictions' in name.lower():
+            return 'output'
+        
+        # 5. NORMALIZATION - Detectar por tipo de módulo
+        elif isinstance(module, (nn.LayerNorm, nn.BatchNorm1d, nn.BatchNorm2d, nn.GroupNorm)):
+            return 'normalization'
+        elif 'norm' in name.lower() or 'ln' in name.lower():
+            return 'normalization'
+        
+        # 6. LINEAR LAYERS - Detectar por tipo de módulo
+        elif isinstance(module, nn.Linear):
+            return 'linear'
+        elif 'dense' in name.lower() or 'linear' in name.lower():
+            return 'linear'
+        
+        # 7. CONVOLUTIONAL - Detectar por tipo de módulo
+        elif isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d, nn.ConvTranspose1d, nn.ConvTranspose2d)):
+            return 'conv'
+        elif 'conv' in name.lower():
+            return 'conv'
+        # Manejar Conv1D de Transformers (que es un Linear disfrazado)
+        elif hasattr(module, 'weight') and hasattr(module, 'bias') and len(module.weight.shape) == 2:
+            return 'linear'
+        
+        # 8. SKIP CONNECTIONS - Detectar por nombre
+        elif any(keyword in name.lower() for keyword in ['skip', 'residual', 'shortcut', 'identity']):
+            return 'skip'
+        
+        # 9. POOLING - Detectar por tipo de módulo
+        elif isinstance(module, (nn.AdaptiveAvgPool1d, nn.AdaptiveAvgPool2d, nn.AdaptiveMaxPool1d, nn.AdaptiveMaxPool2d)):
+            return 'pooling'
+        elif 'pool' in name.lower():
+            return 'pooling'
+        
+        # 10. DROPOUT - Detectar por tipo de módulo
+        elif isinstance(module, (nn.Dropout, nn.Dropout2d, nn.Dropout3d)):
+            return 'dropout'
+        
+        # 11. ACTIVATION - Detectar por tipo de módulo
+        elif isinstance(module, (nn.ReLU, nn.GELU, nn.SiLU, nn.Tanh, nn.Sigmoid)):
+            return 'activation'
+        
+        # 12. OTHER - Todo lo demás
+        else:
+            return 'other'
+
+    def _replace_module_in_model(self, model: nn.Module, module_name: str, new_module: nn.Module):
+        """Reemplaza un módulo en el modelo por nombre"""
+        try:
+            # Dividir el nombre en partes (ej: "transformer.h.0.mlp.c_fc")
+            parts = module_name.split('.')
+            
+            # Navegar hasta el módulo padre
+            current = model
+            for part in parts[:-1]:
+                current = getattr(current, part)
+            
+            # Reemplazar el módulo
+            setattr(current, parts[-1], new_module)
+            
+        except Exception as e:
+            logger.warning(f"Error reemplazando módulo {module_name}: {e}")
 
     def compress_layer(
         self, module: nn.Module, layer_config: Dict[str, Any]
@@ -156,6 +265,10 @@ class CompressionEngine:
         used_names: List[str] = []
 
         try:
+            # Contar elementos no cero originales
+            original_nonzero = torch.count_nonzero(module.weight).item()
+            
+            # Modificar el módulo original directamente
             for method in methods:
                 name = method.get("name", "none")
                 strength = method.get("strength", 0.0)
@@ -163,7 +276,9 @@ class CompressionEngine:
                 used_names.append(name if name in available_methods else "none")
 
             compressed_size = self._module_size(module)
-            ratio = 1 - (compressed_size / original_size) if original_size else 0.0
+            # Calcular ratio basado en elementos no cero
+            compressed_nonzero = torch.count_nonzero(module.weight).item()
+            ratio = 1 - (compressed_nonzero / original_nonzero) if original_nonzero > 0 else 0.0
             return module, CompressionResult(
                 original_size=original_size,
                 compressed_size=compressed_size,
@@ -202,13 +317,25 @@ class CompressionEngine:
     
     def _apply_int8_quantization(self, module: nn.Module, strength: float, config: Dict) -> nn.Module:
         """Aplica cuantización INT8"""
-        if not isinstance(module, nn.Linear):
+        # Verificar si es un módulo que puede ser quantizado (Linear o Conv1D)
+        if not (isinstance(module, nn.Linear) or 
+                (hasattr(module, 'weight') and hasattr(module, 'bias') and 
+                 len(module.weight.shape) == 2)):
             return module
+        
+        # Obtener dimensiones del módulo
+        if isinstance(module, nn.Linear):
+            in_features = module.in_features
+            out_features = module.out_features
+        else:
+            # Para Conv1D, las dimensiones están en weight.shape
+            in_features = module.weight.shape[1]  # nx
+            out_features = module.weight.shape[0]  # nf
         
         # Simular cuantización INT8
         quantized = QuantizedLinear(
-            module.in_features,
-            module.out_features,
+            in_features,
+            out_features,
             bias=module.bias is not None,
             bits=8
         )
@@ -278,12 +405,24 @@ class CompressionEngine:
     
     def _apply_pruning(self, module: nn.Module, strength: float, config: Dict) -> nn.Module:
         """Aplica poda no estructurada"""
-        if not isinstance(module, nn.Linear):
+        # Verificar si es un módulo que puede ser podado (Linear o Conv1D)
+        if not (isinstance(module, nn.Linear) or 
+                (hasattr(module, 'weight') and hasattr(module, 'bias') and 
+                 len(module.weight.shape) == 2)):
             return module
         
+        # Obtener dimensiones del módulo
+        if isinstance(module, nn.Linear):
+            in_features = module.in_features
+            out_features = module.out_features
+        else:
+            # Para Conv1D, las dimensiones están en weight.shape
+            in_features = module.weight.shape[1]  # nx
+            out_features = module.weight.shape[0]  # nf
+        
         pruned = PrunedLinear(
-            module.in_features,
-            module.out_features,
+            in_features,
+            out_features,
             bias=module.bias is not None,
             sparsity=strength,
         )

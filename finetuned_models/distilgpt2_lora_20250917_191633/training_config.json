@@ -1,0 +1,36 @@
+{
+  "peft_method": "lora",
+  "training_config": {
+    "method": "lora",
+    "learning_rate": 0.0002,
+    "num_train_epochs": 3,
+    "per_device_train_batch_size": 4,
+    "gradient_accumulation_steps": 1,
+    "warmup_steps": 100,
+    "weight_decay": 0.01,
+    "logging_steps": 10,
+    "save_steps": 500,
+    "eval_steps": 500,
+    "save_total_limit": 3,
+    "load_best_model_at_end": false,
+    "metric_for_best_model": "eval_loss",
+    "greater_is_better": false,
+    "seed": 42,
+    "target_modules": [
+      "c_attn",
+      "c_proj",
+      "c_fc"
+    ],
+    "r": 16,
+    "lora_alpha": 32,
+    "lora_dropout": 0.1,
+    "bias": "none",
+    "task_type": "CAUSAL_LM",
+    "modules_to_save": [
+      "embed_tokens",
+      "lm_head"
+    ]
+  },
+  "model_name": "distilgpt2",
+  "training_date": "2025-09-17T19:16:45.592754"
+}

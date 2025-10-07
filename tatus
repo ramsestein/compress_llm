@@ -1,0 +1,22 @@
+* [33m95de368[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mfeature/windows-compatibility-and-peft-fixes[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m  Proyecto Compress LLM completo - Sistema de compresión y fine-tuning de modelos de lenguaje
+* [33m5957b73[m feat: Add comprehensive PEFT training system and compression tools
+[31m|[m * [33m5676ef4[m[33m ([m[1;31morigin/codex/add-tests-for-model-compression-error[m[33m)[m test: add recursion limit handling tests
+[31m|[m[31m/[m  
+*   [33m748338d[m Merge pull request #17 from ramsestein/infwxx-codex/fix-compression-model-error
+[33m|[m[34m\[m  
+[33m|[m *   [33m3cbffdf[m[33m ([m[1;31morigin/infwxx-codex/fix-compression-model-error[m[33m)[m Merge branch 'main' into infwxx-codex/fix-compression-model-error
+[33m|[m [35m|[m[33m\[m  
+[33m|[m [35m|[m[33m/[m  
+[33m|[m[33m/[m[35m|[m   
+* [35m|[m   [33med6fe36[m Merge pull request #16 from ramsestein/o8swan-codex/fix-compression-model-error
+[1;31m|[m[1;32m\[m [35m\[m  
+[1;31m|[m * [35m\[m   [33mc32ca48[m[33m ([m[1;31morigin/o8swan-codex/fix-compression-model-error[m[33m)[m Merge branch 'main' into o8swan-codex/fix-compression-model-error
+[1;31m|[m [1;33m|[m[1;31m\[m [35m\[m  
+[1;31m|[m [1;33m|[m[1;31m/[m [35m/[m  
+[1;31m|[m[1;31m/[m[1;33m|[m [35m|[m   
+* [1;33m|[m [35m|[m   [33m2b0cb8f[m Merge pull request #14 from ramsestein/codex/fix-compression-model-error
+[1;35m|[m[1;36m\[m [1;33m\[m [35m\[m  
+[1;35m|[m * [1;33m|[m [35m|[m [33m7b72869[m[33m ([m[1;31morigin/codex/fix-compression-model-error[m[33m)[m Add tests for randomized SVD
+[1;35m|[m[1;35m/[m [1;33m/[m [35m/[m  
+[1;35m|[m * [35m/[m [33m1e0c897[m Handle randomized SVD reconstruction and improve save failure message
+[1;35m|[m[1;35m/[m [35m/[m  

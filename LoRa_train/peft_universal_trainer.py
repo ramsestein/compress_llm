@@ -376,47 +376,117 @@ class PEFTUniversalTrainer:
         tokenized_data = []
         
         for sample in training_data:
+            # Debug: mostrar qué contiene cada muestra
+            logger.info(f"Procesando muestra: {sample}")
+            
             # Formatear texto según el tipo de dataset
             if hasattr(self.peft_config, 'instruction_template'):
-                text = self.peft_config.instruction_template.format(**sample)
+                # Mapear columnas del dataset a los nombres esperados por el template
+                formatted_sample = {}
+                
+                # Obtener configuración de columnas del dataset actual
+                dataset_config = None
+                if hasattr(self, 'dataset_configs') and self.dataset_configs:
+                    dataset_config = self.dataset_configs[0]  # Usar el primer dataset
+                
+                for key, value in sample.items():
+                    if dataset_config and hasattr(dataset_config, 'columns') and dataset_config.columns:
+                        # Usar el mapeo de columnas definido en la configuración
+                        for dataset_col, template_col in dataset_config.columns.items():
+                            if key == dataset_col:
+                                formatted_sample[template_col] = value
+                                break
+                        else:
+                            # Si no está en el mapeo, mantener la clave original
+                            formatted_sample[key] = value
+                    else:
+                        # Fallback: mapeo por nombres conocidos
+                        if key == 'catalan':
+                            formatted_sample['input'] = value
+                        elif key == 'chino' or key == 'chino;;;':
+                            formatted_sample['output'] = value
+                        elif key == 'instruction':
+                            formatted_sample['input'] = value
+                        elif key == 'response':
+                            formatted_sample['output'] = value
+                        else:
+                            formatted_sample[key] = value
+                
+                try:
+                    text = self.peft_config.instruction_template.format(**formatted_sample)
+                except KeyError as e:
+                    logger.warning(f"Error formateando template: {e}. Usando formato simple.")
+                    # Fallback a formato simple
+                    # Buscar las primeras dos columnas con valores no nulos
+                    columns_with_values = [(k, v) for k, v in sample.items() if v is not None and str(v).strip()]
+                    if len(columns_with_values) >= 2:
+                        input_col, input_val = columns_with_values[0]
+                        output_col, output_val = columns_with_values[1]
+                        text = f"{input_val}\n{output_val}"
+                        logger.info(f"Usando columnas de fallback: {input_col} -> {output_col}")
+                    else:
+                        logger.warning(f"No se pudo procesar muestra: {sample}")
+                        continue
             elif 'text' in sample:
                 text = sample['text']
             elif 'instruction' in sample and 'response' in sample:
                 text = f"{sample['instruction']}\n{sample['response']}"
             else:
-                continue
-            
-                    # Tokenizar
-        try:
-            encoded = self.tokenizer(
-                text,
-                truncation=True,
-                padding='max_length',
-                max_length=getattr(self.peft_config, 'max_length', 512),
-                return_tensors=None
-            )
-            
-            # Verificar que el tokenizer retornó un diccionario válido
-            if not isinstance(encoded, dict) or 'input_ids' not in encoded:
-                # Si el tokenizer falla, crear datos mock para testing
-                logger.warning(f"Tokenizer falló para texto: {text[:50]}... Creando datos mock")
-                encoded = {
-                    'input_ids': [1, 2, 3, 4, 5],  # IDs mock
-                    'attention_mask': [1, 1, 1, 1, 1],  # Máscara mock
-                    'labels': [1, 2, 3, 4, 5]  # Labels mock
-                }
-            else:
-                # Añadir labels (igual que input_ids para LM)
-                encoded['labels'] = encoded['input_ids'].copy()
+                # Buscar automáticamente las columnas de entrada y salida
+                columns = list(sample.keys())
+                input_col = None
+                output_col = None
                 
-        except Exception as e:
-            # En caso de error, crear datos mock para testing
-            logger.warning(f"Error en tokenización: {e}. Creando datos mock")
-            encoded = {
-                'input_ids': [1, 2, 3, 4, 5],  # IDs mock
-                'attention_mask': [1, 1, 1, 1, 1],  # Máscara mock
-                'labels': [1, 2, 3, 4, 5]  # Labels mock
-            }
+                # Buscar columna de entrada (primera columna que no sea 'linea' o similar)
+                for col in columns:
+                    if col not in ['linea', 'id', 'index'] and sample[col] is not None:
+                        if input_col is None:
+                            input_col = col
+                        elif output_col is None:
+                            output_col = col
+                            break
+                
+                if input_col and output_col and sample[input_col] and sample[output_col]:
+                    text = f"{sample[input_col]}\n{sample[output_col]}"
+                    logger.info(f"Usando columnas: {input_col} -> {output_col}")
+                else:
+                    logger.warning(f"No se pudo procesar muestra: {sample}")
+                    continue
+            
+            # Tokenizar
+            try:
+                # Limpiar texto antes de tokenizar
+                text_clean = text.strip()
+                if not text_clean:
+                    continue
+                
+                # Debug: check text length
+                text_length = len(text_clean.split())
+                max_length = getattr(self.peft_config, 'max_length', 1024)  # Increased from 512
+                
+                if text_length > max_length:
+                    logger.warning(f"Texto muy largo ({text_length} tokens), truncando a {max_length}")
+                
+                encoded = self.tokenizer(
+                    text_clean,
+                    truncation=True,
+                    padding='max_length',
+                    max_length=max_length,
+                    return_tensors=None
+                )
+                
+                # Verificar que el tokenizer retornó un resultado válido
+                if not hasattr(encoded, 'input_ids') or encoded.input_ids is None:
+                    logger.warning(f"Tokenizer falló para texto: {text_clean[:50]}... Saltando muestra")
+                    logger.warning(f"Tipo de encoded: {type(encoded)}, contenido: {encoded}")
+                    continue
+                else:
+                    # Añadir labels (igual que input_ids para LM)
+                    encoded['labels'] = encoded['input_ids'].copy()
+                    
+            except Exception as e:
+                logger.warning(f"Error en tokenización: {e}. Saltando muestra")
+                continue
             
             tokenized_data.append(encoded)
         
@@ -528,9 +598,13 @@ class PEFTUniversalTrainer:
             self.tokenizer.save_pretrained(self.output_dir)
         
         # Guardar configuración
+        # Convertir configuración a diccionario serializable
+        config_dict = self.peft_config.__dict__.copy()
+        config_dict['method'] = self.peft_config.method.value
+        
         config_info = {
             'peft_method': self.peft_config.method.value,
-            'training_config': self.peft_config.__dict__,
+            'training_config': config_dict,
             'model_name': self.model_name,
             'training_date': datetime.now().isoformat()
         }

@@ -427,30 +427,41 @@ class OptimizedDatasetManager:
             output_col = "response"
         
         # Template de instrucción
-        print("\nTemplate de instrucción:")
+        print("\nTemplate de formato:")
         print("  [1] Simple: {instruction}\n{response}")
         print("  [2] Alpaca: Below is an instruction...\n{instruction}\n\n{response}")
-        print("  [3] Personalizado")
+        print("  [3] Traducción: Translate from {source_lang} to {target_lang}:\n{source_text}\n{target_text}")
+        print("  [4] Personalizado")
         
         while True:
-            template_choice = input("Selecciona template (1-3) [default: 1]: ").strip()
+            template_choice = input("Selecciona template (1-4) [default: 1]: ").strip()
             if not template_choice:
                 template_choice = "1"
-            if template_choice in ["1", "2", "3"]:
+            if template_choice in ["1", "2", "3", "4"]:
                 break
-            print("Por favor selecciona 1, 2 o 3")
+            print("Por favor selecciona 1, 2, 3 o 4")
         
         if template_choice == "1":
             instruction_template = "{instruction}\n{response}"
         elif template_choice == "2":
             instruction_template = "Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:\n{response}"
+        elif template_choice == "3":
+            source_lang = input("Idioma origen [default: Catalan]: ").strip() or "Catalan"
+            target_lang = input("Idioma destino [default: Chinese]: ").strip() or "Chinese"
+            instruction_template = f"Translate from {source_lang} to {target_lang}:\n{{source_text}}\n{{target_text}}"
         else:
             instruction_template = input("Escribe tu template personalizado: ")
+        
+        # Configurar columnas según el tipo de template
+        if template_choice == "3":  # Traducción
+            columns = {"catalan": "source_text", "chino": "target_text"}
+        else:
+            columns = {input_col: "text", output_col: "text"}
         
         return DatasetConfig(
             file_path=Path(dataset_info['file_path']),
             format=dataset_info['format'],
-            columns={input_col: "text", output_col: "text"},
+            columns=columns,
             name=dataset_info.get('name', 'dataset'),
             size=dataset_info.get('size', 0),
             instruction_template=instruction_template,
@@ -601,17 +612,35 @@ class OptimizedDatasetManager:
         return data
     
     def _load_csv(self, config: DatasetConfig, streaming: bool) -> Union[pd.DataFrame, Iterator]:
-        """Carga CSV con opciones de streaming"""
+        """Carga CSV con opciones de streaming y detección automática de formato"""
+        # Intentar carga estándar primero
         kwargs = {
             'encoding': config.encoding,
             'delimiter': config.delimiter,
             'on_bad_lines': 'skip'
         }
         
-        if streaming:
-            return pd.read_csv(config.file_path, chunksize=10000, **kwargs)
-        else:
-            return pd.read_csv(config.file_path, **kwargs)
+        try:
+            if streaming:
+                return pd.read_csv(config.file_path, chunksize=10000, **kwargs)
+            else:
+                return pd.read_csv(config.file_path, **kwargs)
+        except Exception as e:
+            logger.warning(f"Error con formato estándar: {e}. Intentando formato personalizado...")
+            
+            # Intentar con separador personalizado (;;;)
+            try:
+                custom_kwargs = kwargs.copy()
+                custom_kwargs['delimiter'] = ';;;'
+                custom_kwargs['quotechar'] = '"'
+                
+                if streaming:
+                    return pd.read_csv(config.file_path, chunksize=10000, **custom_kwargs)
+                else:
+                    return pd.read_csv(config.file_path, **custom_kwargs)
+            except Exception as e2:
+                logger.error(f"Error con formato personalizado: {e2}")
+                raise e2
     
     def _load_jsonl(self, config: DatasetConfig, streaming: bool) -> Union[pd.DataFrame, Iterator]:
         """Carga JSONL con opciones de streaming"""

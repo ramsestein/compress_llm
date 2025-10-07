@@ -88,8 +88,12 @@ class QuantizationMethod(CompressionMethod):
     def _compress_legacy(self, module: nn.Module, strength: float, 
                         device: torch.device) -> nn.Module:
         """Cuantización manual para compatibilidad"""
+        # Crear una copia del módulo para no modificar el original
+        import copy
+        compressed_module = copy.deepcopy(module)
+        
         with torch.no_grad():
-            weight = module.weight.data
+            weight = compressed_module.weight.data
             
             # Convertir a float32 si es necesario
             original_dtype = weight.dtype
@@ -119,9 +123,9 @@ class QuantizationMethod(CompressionMethod):
             weight_final = weight * (1 - strength) + weight_dq * strength
             
             # Restaurar dtype original
-            module.weight.data = weight_final.to(original_dtype)
+            compressed_module.weight.data = weight_final.to(original_dtype)
         
-        return module
+        return compressed_module
     
     def estimate_compression(self, module: nn.Module, config: Dict[str, Any]) -> float:
         """Estima compresión por cuantización"""
@@ -154,8 +158,12 @@ class PruningMethod(CompressionMethod):
     
     def _magnitude_pruning(self, module: nn.Module, strength: float) -> nn.Module:
         """Poda por magnitud optimizada con manejo correcto de dtype"""
+        # Crear una copia del módulo para no modificar el original
+        import copy
+        compressed_module = copy.deepcopy(module)
+        
         with torch.no_grad():
-            weight = module.weight.data
+            weight = compressed_module.weight.data
             
             # Convertir a float32 si es necesario para quantile
             original_dtype = weight.dtype
@@ -180,12 +188,12 @@ class PruningMethod(CompressionMethod):
             mask = weight.abs() > threshold.to(original_dtype)
             
             # Aplicar máscara
-            module.weight.data *= mask.to(original_dtype)
+            compressed_module.weight.data *= mask.to(original_dtype)
             
             # Guardar máscara para inferencia eficiente
-            module.register_buffer('pruning_mask', mask)
+            compressed_module.register_buffer('pruning_mask', mask)
         
-        return module
+        return compressed_module
     
     def _structured_pruning(self, module: nn.Module, strength: float) -> nn.Module:
         """Poda estructurada (canales/filtros completos)"""

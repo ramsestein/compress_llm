@@ -957,21 +957,36 @@ def apply_compression_to_model(
         # Crear motor de compresión
         engine = CompressionEngine()
         
+        # Cargar modelo original
+        logger.info(f"📦 Cargando modelo desde: {model_path}")
+        model = AutoModelForCausalLM.from_pretrained(model_path)
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        
         # Aplicar compresión
-        compressed_model = engine.compress_model(model_path, config)
+        logger.info("🔧 Aplicando compresión...")
+        compressed_model = engine.compress_model(model, config)
         
         # Guardar modelo comprimido
         output_dir = Path(output_path)
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Aquí se guardaría el modelo comprimido
-        # Por ahora, simulamos el resultado
+        logger.info(f"💾 Guardando modelo comprimido en: {output_dir}")
+        save_pretrained_with_fallback(compressed_model, tokenizer, output_dir, logger=logger)
+        
+        # Calcular compresión real
+        original_size = sum(p.numel() * p.element_size() for p in model.parameters())
+        compressed_size = sum(p.numel() * p.element_size() for p in compressed_model.parameters())
+        compression_ratio = 1 - (compressed_size / original_size)
+        
+        logger.info(f"✅ Compresión completada: {compression_ratio:.2%}")
         
         return {
             "success": True,
             "model_path": output_path,
-            "compression_ratio": 0.3,  # Simulado
-            "method_used": "compression"
+            "compression_ratio": compression_ratio,
+            "method_used": "compression",
+            "original_size": original_size,
+            "compressed_size": compressed_size
         }
         
     except Exception as e:
