@@ -201,12 +201,22 @@ class LoRATrainer:
                 logger.info("Modelo cargado en FP16")
         else:
             # CPU
-            self.model = AutoModelForCausalLM.from_pretrained(
-                str(self.model_path),
-                torch_dtype=torch.float32,
-                low_cpu_mem_usage=True,
-                trust_remote_code=True
-            )
+            try:
+                # Intentar cargar modelo estándar
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    str(self.model_path),
+                    torch_dtype=torch.float32,
+                    low_cpu_mem_usage=True,
+                    trust_remote_code=True
+                )
+            except OSError as e:
+                # Si falla, intentar cargar modelo guardado por componentes
+                if "no file named pytorch_model.bin" in str(e):
+                    logger.info("Modelo guardado por componentes detectado, cargando...")
+                    self.model = self._load_component_model()
+                else:
+                    raise e
+            
             self.model = self.model.to(self.device)
         
         # Preparar para entrenamiento
@@ -269,6 +279,13 @@ class LoRATrainer:
         if hasattr(self.model, 'is_loaded_in_8bit') and self.model.is_loaded_in_8bit:
             self.model = prepare_model_for_kbit_training(self.model)
         
+        # Detectar módulos disponibles si no se especificaron
+        if not lora_config.target_modules:
+            lora_config.target_modules = self._detect_target_modules()
+        
+        logger.info(f"🎯 Módulos objetivo para LoRA: {lora_config.target_modules}")
+        logger.info(f"📊 Total de módulos objetivo: {len(lora_config.target_modules)}")
+        
         # Crear configuración LoRA de PEFT
         peft_config = LoraConfig(
             r=lora_config.r,
@@ -279,6 +296,8 @@ class LoRATrainer:
             target_modules=lora_config.target_modules,
             modules_to_save=lora_config.modules_to_save
         )
+        
+        logger.info(f"🔧 Configuración LoRA creada: r={peft_config.r}, alpha={peft_config.lora_alpha}")
         
         # Aplicar LoRA
         self.model = get_peft_model(self.model, peft_config)
@@ -320,6 +339,7 @@ class LoRATrainer:
             run_name=run_name,
             do_eval=False,  # Simplificado para evitar problemas
             push_to_hub=False,
+            remove_unused_columns=False,  # Evitar problemas con columnas del dataset
         )
         
         return args
@@ -400,3 +420,191 @@ class LoRATrainer:
         
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+    
+    def _load_component_model(self):
+        """Carga un modelo guardado por componentes"""
+        import json
+        from pathlib import Path
+        
+        model_dir = Path(self.model_path)
+        config_path = model_dir / 'config.json'
+        
+        if not config_path.exists():
+            raise ValueError(f"No se encontró config.json en {model_dir}")
+        
+        # Cargar configuración
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        # Crear modelo desde configuración
+        from transformers import GPT2Config
+        
+        # Convertir diccionario a objeto de configuración
+        if isinstance(config, dict):
+            config = GPT2Config(**config)
+        
+        model_class = AutoModelForCausalLM
+        model = model_class.from_config(config)
+        
+        # Cargar parámetros guardados por componentes
+        param_files = list(model_dir.glob('*.pt'))
+        if not param_files:
+            raise ValueError(f"No se encontraron archivos de parámetros .pt en {model_dir}")
+        
+        # Crear state_dict
+        state_dict = {}
+        for param_file in param_files:
+            param_name = param_file.stem
+            param_data = torch.load(param_file, map_location='cpu')
+            state_dict[param_name] = param_data
+        
+        # Cargar parámetros en el modelo
+        missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+        
+        if missing_keys:
+            logger.warning(f"Claves faltantes: {len(missing_keys)}")
+        if unexpected_keys:
+            logger.warning(f"Claves inesperadas: {len(unexpected_keys)}")
+        
+        logger.info(f"Modelo cargado desde componentes: {len(param_files)} parámetros")
+        return model
+    
+    def _detect_target_modules(self):
+        """Detecta automáticamente los módulos objetivo para LoRA en múltiples arquitecturas"""
+        target_modules = []
+        
+        # Detectar arquitectura del modelo
+        model_type = getattr(self.model.config, 'model_type', 'unknown').lower()
+        logger.info(f"🔍 Detectando módulos para arquitectura: {model_type}")
+        
+        # Módulos objetivo por arquitectura
+        architecture_modules = {
+            'gpt2': {
+                'attention': ['attn.c_attn', 'attn.c_proj'],
+                'mlp': ['mlp.c_fc', 'mlp.c_proj'],
+                'pattern': 'transformer.h.{}.{}'
+            },
+            'llama': {
+                'attention': ['self_attn.q_proj', 'self_attn.k_proj', 'self_attn.v_proj', 'self_attn.o_proj'],
+                'mlp': ['mlp.gate_proj', 'mlp.up_proj', 'mlp.down_proj'],
+                'pattern': 'model.layers.{}.{}'
+            },
+            'bert': {
+                'attention': ['attention.self.query', 'attention.self.key', 'attention.self.value', 'attention.output.dense'],
+                'mlp': ['intermediate.dense', 'output.dense'],
+                'pattern': 'encoder.layer.{}.{}'
+            },
+            'bart': {
+                'attention': ['self_attn.q_proj', 'self_attn.k_proj', 'self_attn.v_proj', 'self_attn.out_proj'],
+                'mlp': ['fc1', 'fc2'],
+                'pattern': 'encoder.layers.{}.{}'
+            },
+            't5': {
+                'attention': ['SelfAttention.q', 'SelfAttention.k', 'SelfAttention.v', 'SelfAttention.o'],
+                'mlp': ['DenseReluDense.wi', 'DenseReluDense.wo'],
+                'pattern': 'encoder.block.{}.layer.{}'
+            }
+        }
+        
+        # Obtener configuración para la arquitectura
+        arch_config = architecture_modules.get(model_type, architecture_modules['gpt2'])
+        
+        # Detectar número de capas
+        num_layers = self._detect_num_layers(model_type)
+        logger.info(f"📊 Detectadas {num_layers} capas")
+        
+        # Generar módulos objetivo
+        for layer_idx in range(num_layers):
+            for module_type, module_names in arch_config.items():
+                if module_type == 'attention':
+                    for module_name in module_names:
+                        if '{}' in arch_config['pattern']:
+                            target_name = arch_config['pattern'].format(layer_idx, module_name)
+                        else:
+                            target_name = f"layer_{layer_idx}.{module_name}"
+                        target_modules.append(target_name)
+                elif module_type == 'mlp':
+                    for module_name in module_names:
+                        if '{}' in arch_config['pattern']:
+                            target_name = arch_config['pattern'].format(layer_idx, module_name)
+                        else:
+                            target_name = f"layer_{layer_idx}.{module_name}"
+                        target_modules.append(target_name)
+        
+        # Si no se encontraron módulos, usar detección genérica
+        if not target_modules:
+            logger.info("🔄 Usando detección genérica de módulos...")
+            target_modules = self._generic_module_detection()
+        
+        # Verificar que los módulos existen en el modelo
+        verified_modules = []
+        for module_name in target_modules:
+            try:
+                # Buscar el módulo en el modelo
+                for name, module in self.model.named_modules():
+                    if module_name in name and isinstance(module, (torch.nn.Linear, torch.nn.Conv1d)):
+                        verified_modules.append(name)
+                        break
+            except Exception as e:
+                logger.debug(f"⚠️ Error verificando módulo {module_name}: {e}")
+                continue
+        
+        if not verified_modules:
+            logger.warning("⚠️ No se pudieron verificar módulos, usando lista hardcodeada")
+            verified_modules = self._fallback_modules(model_type, num_layers)
+        
+        logger.info(f"🎯 Módulos objetivo finales: {len(verified_modules)}")
+        logger.info(f"  Primeros 5 módulos:")
+        for i, module in enumerate(verified_modules[:5], 1):
+            logger.info(f"    {i}. {module}")
+        if len(verified_modules) > 5:
+            logger.info(f"  ... y {len(verified_modules) - 5} más")
+        
+        return verified_modules
+    
+    def _detect_num_layers(self, model_type: str) -> int:
+        """Detecta el número de capas del modelo"""
+        try:
+            if hasattr(self.model.config, 'n_layer'):
+                return self.model.config.n_layer
+            elif hasattr(self.model.config, 'num_hidden_layers'):
+                return self.model.config.num_hidden_layers
+            elif hasattr(self.model.config, 'num_layers'):
+                return self.model.config.num_layers
+            else:
+                # Contar capas manualmente
+                layer_count = 0
+                for name, _ in self.model.named_modules():
+                    if any(keyword in name for keyword in ['h.', 'layers.', 'block.']):
+                        layer_count = max(layer_count, int(name.split('.')[1]) + 1)
+                return layer_count if layer_count > 0 else 12
+        except:
+            return 12  # Valor por defecto
+    
+    def _generic_module_detection(self):
+        """Detección genérica de módulos para arquitecturas desconocidas"""
+        target_modules = []
+        
+        for name, module in self.model.named_modules():
+            if isinstance(module, (torch.nn.Linear, torch.nn.Conv1d)):
+                # Buscar módulos de atención y MLP
+                if any(keyword in name.lower() for keyword in ['attn', 'attention', 'mlp', 'ffn', 'proj']):
+                    target_modules.append(name)
+        
+        return target_modules
+    
+    def _fallback_modules(self, model_type: str, num_layers: int):
+        """Módulos de respaldo si falla la detección automática"""
+        if model_type == 'gpt2':
+            fallback = []
+            for i in range(num_layers):
+                fallback.extend([
+                    f'transformer.h.{i}.attn.c_attn',
+                    f'transformer.h.{i}.attn.c_proj',
+                    f'transformer.h.{i}.mlp.c_fc',
+                    f'transformer.h.{i}.mlp.c_proj'
+                ])
+            return fallback
+        else:
+            # Para otras arquitecturas, usar módulos genéricos
+            return ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']

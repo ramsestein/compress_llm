@@ -5,7 +5,7 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Set
+from typing import Dict, List, Any, Optional, Set, Tuple
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing as mp
@@ -349,6 +349,83 @@ class CompressionConfigManager:
         self._summary_cache = summary
         return summary
     
+    def load_config(self, config_path: Path) -> Optional[Dict[str, Any]]:
+        """Carga una configuración desde un archivo"""
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            logger.info(f"✅ Configuración cargada desde: {config_path}")
+            return config
+        except Exception as e:
+            logger.error(f"❌ Error cargando configuración: {e}")
+            return None
+
+    def save_config(self, config: Dict[str, Any], config_path: Path) -> bool:
+        """Guarda una configuración en un archivo"""
+        try:
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+            logger.info(f"✅ Configuración guardada en: {config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error guardando configuración: {e}")
+            return False
+    
+    def validate_config(self, config: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """Valida una configuración de compresión"""
+        errors = []
+        
+        # Validar estructura básica
+        if 'metadata' not in config:
+            errors.append("Falta sección 'metadata'")
+        
+        if 'global_settings' not in config:
+            errors.append("Falta sección 'global_settings'")
+        
+        # Validar metadata
+        metadata = config.get('metadata', {})
+        if 'model_name' not in metadata:
+            errors.append("Falta 'model_name' en metadata")
+        
+        # Validar configuración global
+        global_settings = config.get('global_settings', {})
+        if 'target_compression' in global_settings:
+            target = global_settings['target_compression']
+            if not isinstance(target, (int, float)) or target < 0 or target > 1:
+                errors.append("'target_compression' debe ser un número entre 0 y 1")
+        
+        # Validar configuraciones de capas
+        layer_configs = config.get('layer_configs', {})
+        for layer_name, layer_config in layer_configs.items():
+            if 'methods' not in layer_config:
+                errors.append(f"Falta 'methods' en configuración de capa '{layer_name}'")
+            else:
+                methods = layer_config['methods']
+                if not isinstance(methods, list):
+                    errors.append(f"'methods' debe ser una lista en capa '{layer_name}'")
+                else:
+                    for i, method in enumerate(methods):
+                        if not isinstance(method, dict):
+                            errors.append(f"Método {i} en capa '{layer_name}' debe ser un diccionario")
+                        elif 'name' not in method:
+                            errors.append(f"Falta 'name' en método {i} de capa '{layer_name}'")
+                        elif 'strength' not in method:
+                            errors.append(f"Falta 'strength' en método {i} de capa '{layer_name}'")
+                        else:
+                            strength = method['strength']
+                            if not isinstance(strength, (int, float)) or strength < 0 or strength > 1:
+                                errors.append(f"'strength' debe ser un número entre 0 y 1 en método {i} de capa '{layer_name}'")
+        
+        is_valid = len(errors) == 0
+        if is_valid:
+            logger.info("✅ Configuración válida")
+        else:
+            logger.warning(f"⚠️ Configuración inválida: {len(errors)} errores")
+            for error in errors:
+                logger.warning(f"  - {error}")
+        
+        return is_valid, errors
+
     def save_configuration(self, filename: Optional[str] = None):
         """Guarda la configuración en JSON"""
         if filename is None:

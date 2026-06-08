@@ -19,6 +19,31 @@ import gc
 
 console = Console()
 
+def merge_lora_weights(base_weight: torch.Tensor, lora_A: torch.Tensor, lora_B: torch.Tensor, scaling: float = 1.0) -> torch.Tensor:
+    """Fusiona pesos LoRA con el peso base"""
+    if not isinstance(base_weight, torch.Tensor):
+        raise TypeError("base_weight debe ser un tensor")
+    if not isinstance(lora_A, torch.Tensor):
+        raise TypeError("lora_A debe ser un tensor")
+    if not isinstance(lora_B, torch.Tensor):
+        raise TypeError("lora_B debe ser un tensor")
+    
+    # Verificar dimensiones compatibles
+    if lora_A.dim() != 2 or lora_B.dim() != 2:
+        raise ValueError("lora_A y lora_B deben ser matrices 2D")
+    
+    # Calcular el peso LoRA: B @ A
+    lora_weight = torch.matmul(lora_B, lora_A) * scaling
+    
+    # Verificar que las dimensiones coincidan con el peso base
+    if lora_weight.shape != base_weight.shape:
+        raise ValueError(f"Dimensiones incompatibles: lora_weight {lora_weight.shape} vs base_weight {base_weight.shape}")
+    
+    # Fusionar con el peso base
+    merged_weight = base_weight + lora_weight
+    
+    return merged_weight
+
 def merge_lora_adapter(lora_model_path: str, output_path: str, 
                       push_to_hub: bool = False, hub_model_id: str = None):
     """Fusiona adaptadores LoRA con el modelo base"""

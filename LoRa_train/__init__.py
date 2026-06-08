@@ -20,12 +20,15 @@ from .peft_methods_config import (
     MoLoRAConfig,
     GaLoreConfig,
     DoRAConfig,
-    AdaLoRAConfig,
     BitFitConfig,
     IA3Config,
     PromptTuningConfig,
     AdapterConfig,
     QLoRAConfig,
+    CompacterConfig,
+    KronAConfig,
+    S4Config,
+    HoulsbyConfig,
     PEFTPresets,
     get_config_by_name
 )
@@ -38,18 +41,22 @@ from .peft_methods import (
     GaLoreProjector,
     GaLoreLinear,
     DoRALinear,
-    AdaLoRALinear,
     BitFitModel,
     IA3Linear,
     PromptEncoder,
-    Adapter,
-    AdapterLayer,
+    AdapterLinear,
+    QuantizedLoRALinear,
+    PrunedLoRALinear,
+    CompacterLinear,
+    KronALinear,
+    S4Adapter,
+    HoulsbyAdapterLinear,
     create_peft_model
 )
 
 # Importar entrenadores
 from .lora_trainer import LoRATrainer
-from .peft_universal_trainer import UniversalPEFTTrainer, load_peft_model
+from .peft_universal_trainer import PEFTUniversalTrainer
 
 # Importar gestor de datasets
 from .dataset_manager import (
@@ -74,12 +81,15 @@ __all__ = [
     "MoLoRAConfig",
     "GaLoreConfig",
     "DoRAConfig",
-    "AdaLoRAConfig",
     "BitFitConfig",
     "IA3Config",
     "PromptTuningConfig",
     "AdapterConfig",
     "QLoRAConfig",
+    "CompacterConfig",
+    "KronAConfig",
+    "S4Config",
+    "HoulsbyConfig",
     "PEFTPresets",
     "get_config_by_name",
     
@@ -90,18 +100,21 @@ __all__ = [
     "GaLoreProjector",
     "GaLoreLinear",
     "DoRALinear",
-    "AdaLoRALinear",
     "BitFitModel",
     "IA3Linear",
     "PromptEncoder",
-    "Adapter",
-    "AdapterLayer",
+    "AdapterLinear",
+    "QuantizedLoRALinear",
+    "PrunedLoRALinear",
+    "CompacterLinear",
+    "KronALinear",
+    "S4Adapter",
+    "HoulsbyAdapterLinear",
     "create_peft_model",
     
     # Entrenadores
     "LoRATrainer",
-    "UniversalPEFTTrainer",
-    "load_peft_model",
+    "PEFTUniversalTrainer",
     
     # Dataset manager
     "DatasetConfig",

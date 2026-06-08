@@ -107,6 +107,33 @@ class CompressionEngine:
             method_config.update(layer_config["params"])
         return _apply_compression(module, method_config, self.device)
 
+    def compress_model(self, model: nn.Module, config: Dict[str, Any]) -> nn.Module:
+        """Comprime un modelo completo según la configuración"""
+        logger = logging.getLogger(__name__)
+        
+        try:
+            compressed_model = model
+            total_compression = 0.0
+            
+            # Aplicar compresión por capas
+            for name, module in model.named_modules():
+                if name in config.get('layer_configs', {}):
+                    layer_config = config['layer_configs'][name]
+                    compressed_module, result = self.compress_layer(module, layer_config)
+                    
+                    if result.success:
+                        total_compression += result.compression_ratio
+                        logger.info(f"✅ Capa {name} comprimida: {result.compression_ratio:.2%}")
+                    else:
+                        logger.warning(f"⚠️ Fallo comprimiendo capa {name}: {result.error}")
+            
+            logger.info(f"🎯 Compresión total del modelo: {total_compression:.2%}")
+            return compressed_model
+            
+        except Exception as e:
+            logger.error(f"❌ Error comprimiendo modelo: {e}")
+            return model
+
     def compress_layer(
         self, module: nn.Module, layer_config: Dict[str, Any]
     ) -> Tuple[nn.Module, CompressionResult]:
@@ -221,11 +248,11 @@ class CompressionEngine:
         return quantized
     
     def _apply_int2_quantization(self, module: nn.Module, strength: float, config: Dict) -> nn.Module:
-        """Aplica cuantización binaria/ternaria"""
+        """Aplica cuantización ternaria (INT2)"""
         if not isinstance(module, nn.Linear):
             return module
         
-        # Cuantización ternaria: -1, 0, 1
+        # Crear capa ternaria
         ternary = TernaryLinear(
             module.in_features,
             module.out_features,
@@ -235,7 +262,14 @@ class CompressionEngine:
         # Ternarizar pesos
         threshold = module.weight.data.abs().mean() * strength
         ternary.weight.data = torch.sign(module.weight.data) * (module.weight.data.abs() > threshold)
-        ternary.scale = module.weight.data.abs().mean()
+        
+        # Crear el buffer scale de forma segura
+        scale_value = module.weight.data.abs().mean().detach()
+        if not hasattr(ternary, 'scale'):
+            ternary.register_buffer('scale', scale_value)
+        else:
+            # Usar detach() para evitar problemas con grad
+            ternary.scale.data = scale_value
         
         if module.bias is not None:
             ternary.bias.data = module.bias.data.clone()
