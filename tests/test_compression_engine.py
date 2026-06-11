@@ -7,6 +7,9 @@ import unittest
 # Asegurar que el paquete del proyecto esté en el path de importación
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# Asegurar que el paquete del proyecto esté en el path de importación
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from create_compress.compression_engine import CompressionEngine, QuantizedLinear
 from create_compress.compression_methods import LowRankApproximation
 from transformers import GPT2Config, AutoModelForCausalLM
@@ -88,4 +91,3 @@ class TestCompressionEngine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
