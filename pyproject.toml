@@ -1,0 +1,142 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "compress-llm"
+version = "1.0.0"
+description = "A comprehensive suite for LLM compression and parameter-efficient fine-tuning with zero-code CLI and Ollama integration."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [
+    {name = "Ramses Marrero"}
+]
+keywords = [
+    "llm",
+    "compression",
+    "quantization",
+    "pruning",
+    "lora",
+    "peft",
+    "fine-tuning",
+    "ollama",
+    "transformers",
+    "language-model"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "torch>=2.5.0",
+    "transformers>=4.36.0",
+    "accelerate>=0.25.0",
+    "safetensors>=0.4.0",
+    "peft>=0.6.0",
+    "protobuf>=3.20.0",
+    "huggingface-hub>=0.20.0",
+    "datasets>=2.15.0",
+    "tokenizers>=0.15.0",
+    "numpy>=1.26.0",
+    "scipy>=1.11.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+    "plotly>=5.18.0",
+    "tqdm>=4.66.0",
+    "rich>=13.7.0",
+    "pandas>=2.1.0",
+    "pyarrow>=14.0.0",
+    "psutil>=5.9.0",
+    "py-cpuinfo>=9.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.0.0",
+    "sentencepiece>=0.1.99",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.3.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "tensorboard>=2.13.0",
+]
+docs = [
+    "sphinx>=7.0.0",
+    "sphinx-rtd-theme>=1.3.0",
+    "myst-parser>=2.0.0",
+]
+quant = [
+    "bitsandbytes>=0.41.0",
+    "auto-gptq>=0.5.0",
+]
+compress = [
+    "tensorly>=0.8.0",
+    "onnx>=1.14.0",
+    "onnxruntime>=1.15.0",
+]
+
+[project.scripts]
+compress-llm = "compress_llm.cli:main"
+finetune-llm = "compress_llm.cli:finetune_main"
+ollama-serve = "compress_llm.cli:serve_main"
+distill-llm = "compress_llm.cli:distill_main"
+
+[project.urls]
+Homepage = "https://github.com/ramsestein/compress_llm"
+Repository = "https://github.com/ramsestein/compress_llm.git"
+Issues = "https://github.com/ramsestein/compress_llm/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["create_compress*", "LoRa_train*", "compress_llm*", "down_report*", "tests*"]
+exclude = ["*.tests", "*.tests.*", "tests.*", "test*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--cov=create_compress --cov=LoRa_train --cov-report=term-missing --cov-report=html"
+
+[tool.coverage.run]
+source = ["create_compress", "LoRa_train", "compress_llm"]
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "D", "UP", "B", "C4", "SIM"]
+ignore = ["E501", "D203", "D211", "D212", "D213"]
+per-file-ignores = {
+    "LoRa_train/**" = ["D100", "D102", "D103", "D105", "D107", "D205", "D401", "N806", "N812", "N999", "SIM102", "SIM115", "B019", "E741"],
+    "create_compress/**" = ["D100", "D102", "D103", "D105", "D107", "D205", "D401", "SIM102", "SIM115", "N806", "E741", "SIM116", "N812"],
+    "down_report/**" = ["D100", "D102", "D103", "D105", "D107", "D205", "D401", "SIM102", "SIM108", "N806"],
+    "scripts/**" = ["D100", "D102", "D103", "D105", "D107", "D205", "D401", "SIM102", "N806", "N803", "D101", "E741", "B007"],
+    "tests/**" = ["D100", "D102", "D103", "D105", "D107", "D205", "D401", "N806", "SIM102", "SIM105", "SIM117", "B017", "B007"],
+}
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

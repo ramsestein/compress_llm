@@ -1,0 +1,7 @@
+include README.md
+include LICENSE
+include requirements.txt
+include CHANGELOG.md
+include CITATION.cff
+recursive-include docs *.md *.rst *.txt
+recursive-include tests *.py

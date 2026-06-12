@@ -1,81 +1,73 @@
-"""
-Módulo LoRA y PEFT para fine-tuning eficiente de modelos de lenguaje
-"""
+"""LoRA and PEFT module for efficient language model fine-tuning."""
 
-# Importar clases principales de configuración
+# Import main configuration classes
+# Import dataset manager
+from .dataset_manager import DatasetConfig, OptimizedDatasetManager
 from .lora_config import (
-    LoRAConfig,
-    TrainingConfig,
     DataConfig,
+    LoRAConfig,
     LoRAPresets,
+    TaskType,
+    TrainingConfig,
     get_model_specific_config,
-    TaskType
 )
 
-# Importar configuraciones PEFT
-from .peft_methods_config import (
-    PEFTMethod,
-    BasePEFTConfig,
-    LoRAConfig as PEFTLoRAConfig,
-    MoLoRAConfig,
-    GaLoreConfig,
-    DoRAConfig,
-    BitFitConfig,
-    IA3Config,
-    PromptTuningConfig,
-    AdapterConfig,
-    QLoRAConfig,
-    CompacterConfig,
-    KronAConfig,
-    S4Config,
-    HoulsbyConfig,
-    PEFTPresets,
-    get_config_by_name
-)
-
-# Importar métodos PEFT
-from .peft_methods import (
-    BasePEFTModule,
-    MoLoRARouter,
-    MoLoRALinear,
-    GaLoreProjector,
-    GaLoreLinear,
-    DoRALinear,
-    BitFitModel,
-    IA3Linear,
-    PromptEncoder,
-    AdapterLinear,
-    QuantizedLoRALinear,
-    PrunedLoRALinear,
-    CompacterLinear,
-    KronALinear,
-    S4Adapter,
-    HoulsbyAdapterLinear,
-    create_peft_model
-)
-
-# Importar entrenadores
+# Import trainers
 from .lora_trainer import LoRATrainer
-from .peft_universal_trainer import PEFTUniversalTrainer
 
-# Importar gestor de datasets
-from .dataset_manager import (
-    DatasetConfig,
-    OptimizedDatasetManager
+# Import PEFT methods
+from .peft_methods import (
+    AdapterLinear,
+    BasePEFTModule,
+    BitFitModel,
+    CompacterLinear,
+    DoRALinear,
+    GaLoreLinear,
+    GaLoreProjector,
+    HoulsbyAdapterLinear,
+    IA3Linear,
+    KronALinear,
+    MoLoRALinear,
+    MoLoRARouter,
+    PromptEncoder,
+    PrunedLoRALinear,
+    QuantizedLoRALinear,
+    S4Adapter,
+    create_peft_model,
 )
+
+# Import PEFT configurations
+from .peft_methods_config import (
+    AdapterConfig,
+    BasePEFTConfig,
+    BitFitConfig,
+    CompacterConfig,
+    DoRAConfig,
+    GaLoreConfig,
+    HoulsbyConfig,
+    IA3Config,
+    KronAConfig,
+    MoLoRAConfig,
+    PEFTMethod,
+    PEFTPresets,
+    PromptTuningConfig,
+    QLoRAConfig,
+    S4Config,
+    get_config_by_name,
+)
+from .peft_universal_trainer import PEFTUniversalTrainer
 
 __version__ = "0.1.0"
 
 __all__ = [
-    # Configuraciones LoRA
+    # LoRA configurations
     "LoRAConfig",
-    "TrainingConfig", 
+    "TrainingConfig",
     "DataConfig",
     "LoRAPresets",
     "get_model_specific_config",
     "TaskType",
-    
-    # Configuraciones PEFT
+    # PEFT configurations
     "PEFTMethod",
     "BasePEFTConfig",
     "MoLoRAConfig",
@@ -92,8 +84,7 @@ __all__ = [
     "HoulsbyConfig",
     "PEFTPresets",
     "get_config_by_name",
-    
-    # Métodos PEFT
+    # PEFT methods
     "BasePEFTModule",
     "MoLoRARouter",
     "MoLoRALinear",
@@ -111,12 +102,10 @@ __all__ = [
     "S4Adapter",
     "HoulsbyAdapterLinear",
     "create_peft_model",
-    
-    # Entrenadores
+    # Trainers
     "LoRATrainer",
     "PEFTUniversalTrainer",
-    
     # Dataset manager
     "DatasetConfig",
-    "OptimizedDatasetManager"
+    "OptimizedDatasetManager",
 ]
