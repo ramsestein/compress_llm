@@ -54,14 +54,14 @@ class TestPEFTMethodsSpecific(unittest.TestCase):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Create módulos de prueba
-        self.linear_layer = nn.Linear(100, 50)
-        self.attention_layer = nn.Linear(768, 768)
-        self.ffn_layer = nn.Linear(768, 3072)
+        self.linear_layer = nn.Linear(100, 50).to(self.device)
+        self.attention_layer = nn.Linear(768, 768).to(self.device)
+        self.ffn_layer = nn.Linear(768, 3072).to(self.device)
 
         # Create datos de prueba
         self.batch_size = 4
         self.seq_len = 10
-        self.input_data = torch.randn(self.batch_size, self.seq_len, 100)
+        self.input_data = torch.randn(self.batch_size, self.seq_len, 100, device=self.device)
 
     def tearDown(self):
         """Limpieza después de cada test."""

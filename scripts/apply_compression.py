@@ -14,6 +14,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+# Allow imports when running from scripts/ directory
+_script_dir = Path(__file__).resolve().parent
+if (_script_dir / "create_compress").exists():
+    sys.path.insert(0, str(_script_dir))
+else:
+    sys.path.insert(0, str(_script_dir.parent))
+
 import torch
 import torch.nn as nn
 from tqdm import tqdm

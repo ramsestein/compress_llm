@@ -781,16 +781,11 @@ class TestLoRASystemComprehensive(unittest.TestCase):
 
     def test_device_compatibility(self):
         """Test of compatibilidad de dispositivos."""
-        # Test en CPU
-        cpu_trainer = LoRATrainer(
+        trainer = LoRATrainer(
             model_name="test_model", model_path=self.test_dir, output_dir=self.test_dir
         )
-        self.assertEqual(cpu_trainer.device.type, "cpu")
-
-        # Test en GPU si está disponible
-        if torch.cuda.is_available():
-            LoRATrainer(model_name="test_model", model_path=self.test_dir, output_dir=self.test_dir)
-            # El trainer debería manejar la GPU correctamente
+        expected_device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.assertEqual(trainer.device.type, expected_device)
 
     def test_numerical_stability(self):
         """Test of estabilidad numérica."""
