@@ -32,34 +32,26 @@ pyarrow>=14.0.0
 psutil>=5.9.0
 py-cpuinfo>=9.0.0
 
-# Dependencias para el servidor compatible con Ollama
+# Ollama-compatible server dependencies
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 pydantic>=2.0.0
 sentencepiece>=0.1.99
-protobuf>=3.20.0
 
-# Desarrollo/Testing
+# Development / testing
 pytest>=7.3.0
 black>=23.0.0
 tensorboard>=2.13.0
 
-# Utilidades
-psutil>=5.9.0
-py-cpuinfo>=9.0.0
+# Optional: performance
+ninja>=1.11.0  # optimized compilation
+triton>=2.0.0  # Linux and certain Python versions only
 
-# Optional: For better performance (commented out problematic packages)
-ninja>=1.11.0  # Para compilación optimizada
-triton>=2.0.0  # Solo disponible en Linux y ciertas versiones de Python
+# Optional: quantization experiments
+bitsandbytes>=0.41.0  # may have issues on Windows
+auto-gptq>=0.5.0  # requires specific setup
 
-# Optional: For quantization experiments
-bitsandbytes>=0.41.0  # Puede tener problemas en Windows
-auto-gptq>=0.5.0  # Requiere configuración específica
-
-# Opcional: Para métodos de compresión avanzados
-tensorly>=0.8.0  # Para descomposición tensorial
-onnx>=1.14.0     # Para exportación ONNX
-onnxruntime>=1.15.0  # Para optimización ONNX
-
-# Opcional: para usar el cliente de prueba con librería ollama
-# ollama>=0.1.0
+# Optional: advanced compression methods
+tensorly>=0.8.0  # tensor decomposition
+onnx>=1.14.0     # ONNX export
+onnxruntime>=1.15.0  # ONNX optimization

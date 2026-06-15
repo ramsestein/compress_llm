@@ -2,34 +2,34 @@
 
 Este directorio contiene una suite completa de tests muy minuciosos para verificar que todas las partes del proyecto funcionan correctamente.
 
-## 📋 Descripción General
+## Description General
 
 Los tests están organizados en **4 categorías principales**:
 
 ### 1. 🗜️ **Sistema de Compresión** (`compression`)
 - `test_compression_system_comprehensive.py` - Test comprehensivo del sistema de compresión
-- `test_compression_engine.py` - Test del motor de compresión
-- `test_compression_verification.py` - Test de verificación de compresión
+- `test_compression_engine.py` - Test ofl motor de compresión
+- `test_compression_verification.py` - Test of verificación de compresión
 
-### 2. 🎯 **Sistema LoRA** (`lora`)
+### 2. **LoRA system** (`lora`)
 - `test_lora_system_comprehensive.py` - Test comprehensivo del sistema LoRA
-- `test_lora_trainer.py` - Test del trainer LoRA
-- `test_lora_model.py` - Test de modelos LoRA
-- `test_peft_methods_config.py` - Test de configuración de métodos PEFT
-- `test_peft_universal_trainer.py` - Test del trainer universal PEFT
-- `test_dataset_manager.py` - Test del gestor de datasets
+- `test_lora_trainer.py` - Test ofl trainer LoRA
+- `test_lora_model.py` - Test of modelos LoRA
+- `test_peft_methods_config.py` - Test of configuración de métodos PEFT
+- `test_peft_universal_trainer.py` - Test ofl trainer universal PEFT
+- `test_dataset_manager.py` - Test ofl gestor de datasets
 - `test_dataset_manager_comprehensive.py` - Test comprehensivo del gestor de datasets
-- `test_training_execution.py` - Test de ejecución de entrenamiento
+- `test_training_execution.py` - Test of ejecución de entrenamiento
 
 ### 3. 📜 **Scripts Principales** (`scripts`)
 - `test_main_scripts_comprehensive.py` - Test comprehensivo de scripts principales
-- `test_merge_lora.py` - Test de fusión de LoRA
-- `test_ollama_server.py` - Test del servidor Ollama
+- `test_merge_lora.py` - Test of fusión de LoRA
+- `test_ollama_server.py` - Test ofl servidor Ollama
 
 ### 4. 🛠️ **Utilidades** (`utilities`)
 - `test_utilities_comprehensive.py` - Test comprehensivo de utilidades
 
-## 🚀 Ejecución de Tests
+## Ejecución de Tests
 
 ### Modos de Ejecución
 
@@ -71,50 +71,50 @@ python tests/run_all_tests.py comprehensive
 python tests/run_all_tests.py specific test_compression_system_comprehensive.py
 ```
 
-## 📊 Cobertura de Tests
+## Cobertura de Tests
 
 ### Sistema de Compresión
-- ✅ **Motor de compresión**: Inicialización, métodos, configuración
-- ✅ **Métodos de compresión**: Cuantización, poda, descomposición
-- ✅ **Perfiles de compresión**: Conservador, balanceado, agresivo
-- ✅ **Gestor de configuración**: Validación, guardado, carga
-- ✅ **Configuración interactiva**: Builder, selección de perfiles
-- ✅ **Integración**: Flujos completos, manejo de errores
-- ✅ **Compatibilidad**: CPU/GPU, estabilidad numérica
-- ✅ **Reproducibilidad**: Seeds, resultados consistentes
+- **Motor de compresión**: Initialization, métodos, configuración
+- **Methods de compresión**: Cuantización, poda, descomposición
+- **Profilees de compresión**: Conservative, balanceado, agresivo
+- **Gestor de configuración**: Validación, guardado, carga
+- **Configuración interactiva**: Builder, selección de perfiles
+- **Integración**: Flujos completos, manejo de errores
+- **Compatibilidad**: CPU/GPU, estabilidad numérica
+- **Reproducibilidad**: Seeds, resultados consistentes
 
-### Sistema LoRA
-- ✅ **Configuración LoRA**: Inicialización, personalización, serialización
-- ✅ **Presets LoRA**: Balanced, fast, quality
-- ✅ **Configuración específica por modelo**: GPT2, LLaMA, BERT, T5
-- ✅ **Métodos PEFT**: MoLoRA, AdaLoRA, DoRA, Adapter
-- ✅ **Gestor de datasets**: Escaneo, análisis, configuración
-- ✅ **Trainer LoRA**: Inicialización, callbacks, progreso
-- ✅ **Integración**: Flujos completos, estimación de memoria
-- ✅ **Compatibilidad**: Dispositivos, valores extremos
+### LoRA system
+- **Configuración LoRA**: Initialization, personalización, serialización
+- **Presets LoRA**: Balanced, fast, quality
+- **Configuración específica por modelo**: GPT2, LLaMA, BERT, T5
+- **Methods PEFT**: MoLoRA, AdaLoRA, DoRA, Adapter
+- **Gestor de datasets**: Escaneo, análisis, configuración
+- **Trainer LoRA**: Initialization, callbacks, progreso
+- **Integración**: Flujos completos, estimación de memoria
+- **Compatibilidad**: Dispositivos, valores extremos
 
 ### Scripts Principales
-- ✅ **apply_compression**: Guardado, carga, validación
-- ✅ **finetune_lora**: Configuración, argumentos, flujos
-- ✅ **verify_compression**: Información, estadísticas, comparación
-- ✅ **test_compressed_model**: Funcionalidad básica
-- ✅ **merge_lora**: Fusión de pesos
-- ✅ **ollama_compact_server**: Inicialización, carga de modelos
-- ✅ **Integración**: Parsing de argumentos, manejo de errores
-- ✅ **Compatibilidad**: Dispositivos, gestión de memoria
-- ✅ **Utilidades**: Logging, archivos, variables de entorno
+- **apply_compression**: Guardado, carga, validación
+- **finetune_lora**: Configuración, argumentos, flujos
+- **verify_compression**: Información, estadísticas, comparación
+- **test_compressed_model**: Funcionalidad básica
+- **merge_lora**: Fusión de pesos
+- **ollama_compact_server**: Initialization, carga de modelos
+- **Integración**: Parsing de argumentos, manejo de errores
+- **Compatibilidad**: Dispositivos, gestión de memoria
+- **Utilidades**: Logging, archivos, variables de entorno
 
 ### Utilidades
-- ✅ **create_compression_config**: Análisis, generación, guardado
-- ✅ **analyze_model**: Analizador, capas, estadísticas
-- ✅ **create_test_dataset**: Datasets sintéticos, traducción, QA
-- ✅ **Operaciones de archivos**: Creación, lectura, escritura
-- ✅ **Operaciones JSON**: Serialización, deserialización
-- ✅ **Operaciones PyTorch**: Tensores, guardado, carga
-- ✅ **Operaciones NumPy**: Arrays, estadísticas
-- ✅ **Utilidades generales**: Hashing, compresión, timing
-- ✅ **Manejo de errores**: Excepciones, validación
-- ✅ **Logging**: Configuración, niveles, archivos
+- **create_compression_config**: Análisis, generación, guardado
+- **analyze_model**: Analizador, layers, estadísticas
+- **create_test_dataset**: Datasets sintéticos, traducción, QA
+- **Operaciones de archivos**: Creación, lectura, escritura
+- **Operaciones JSON**: Serialización, deserialización
+- **Operaciones PyTorch**: Tensores, guardado, carga
+- **Operaciones NumPy**: Arrays, estadísticas
+- **Utilidades generales**: Hashing, compresión, timing
+- **Manejo de errores**: Excepciones, validación
+- **Logging**: Configuración, niveles, archivos
 
 ## 🧪 Detalles de los Tests
 
@@ -142,27 +142,27 @@ python tests/run_all_tests.py specific test_compression_system_comprehensive.py
 
 ### Características de los Tests
 
-#### ✅ **Muy Minuciosos**
+#### **Muy Minuciosos**
 - Cada componente se prueba exhaustivamente
 - Se verifican casos límite y valores extremos
 - Se incluyen tests de manejo de errores
 
-#### ✅ **Completos**
+#### **Completos**
 - Cubren todas las funcionalidades del proyecto
 - Incluyen tests de integración entre componentes
 - Verifican flujos completos de trabajo
 
-#### ✅ **Robustos**
+#### **Robustos**
 - Manejan errores graciosamente
 - Incluyen mocks para evitar dependencias externas
 - Son compatibles con CPU y GPU
 
-#### ✅ **Organizados**
+#### **Organizados**
 - Categorizados por funcionalidad
 - Fácil de ejecutar individualmente o en conjunto
 - Proporcionan feedback detallado
 
-## 📈 Métricas de Calidad
+## Métricas de Calidad
 
 ### Cobertura
 - **100%** de los módulos principales cubiertos
@@ -180,7 +180,7 @@ python tests/run_all_tests.py specific test_compression_system_comprehensive.py
 - Tests determinísticos
 - Limpieza automática de recursos
 
-## 🔧 Configuración
+## Configuración
 
 ### Requisitos
 ```bash
@@ -196,7 +196,7 @@ export CUDA_VISIBLE_DEVICES=0
 export LOG_LEVEL=INFO
 ```
 
-### Configuración de Tests
+### Configuration for Tests
 Los tests se ejecutan automáticamente con la configuración por defecto. Para personalizar:
 
 1. **Modificar verbosidad**: Cambiar `verbosity` en `run_all_tests.py`
@@ -205,7 +205,7 @@ Los tests se ejecutan automáticamente con la configuración por defecto. Para p
 
 ## 🐛 Solución de Problemas
 
-### Errores Comunes
+### Errors Comunes
 
 #### ImportError: No module named 'X'
 ```bash
@@ -234,7 +234,7 @@ python -m unittest tests.test_compression_system_comprehensive -v
 python -m pdb tests/run_all_tests.py specific test_file.py
 ```
 
-## 📝 Contribución
+## Contribución
 
 ### Agregar Nuevos Tests
 
@@ -245,15 +245,15 @@ python -m pdb tests/run_all_tests.py specific test_file.py
 
 ### Convenciones
 
-- **Nombres**: `test_<componente>_comprehensive.py`
+- **Names**: `test_<componente>_comprehensive.py`
 - **Clases**: `Test<Componente>Comprehensive`
-- **Métodos**: `test_<funcionalidad>_<aspecto>()`
+- **Methods**: `test_<funcionalidad>_<aspecto>()`
 - **Documentación**: Docstrings descriptivos
 
 ### Estructura de Test
 ```python
 def test_component_functionality(self):
-    """Test de funcionalidad del componente"""
+    """Test of funcionalidad del componente"""
     # Arrange
     component = Component()
     
@@ -265,7 +265,7 @@ def test_component_functionality(self):
     self.assertEqual(result.expected_value, actual_value)
 ```
 
-## 🎯 Objetivos de Calidad
+## Objetivos de Calidad
 
 ### Metas
 - **100%** de tests pasando
@@ -278,7 +278,7 @@ def test_component_functionality(self):
 - Revisar métricas de cobertura
 - Mantener tests actualizados con cambios de código
 
-## 📚 Referencias
+## Referencias
 
 - [Documentación de unittest](https://docs.python.org/3/library/unittest.html)
 - [Mejores prácticas de testing](https://realpython.com/python-testing/)

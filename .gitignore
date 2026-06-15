@@ -60,6 +60,7 @@ logs/
 *.cache
 *.bak
 *.backup
+.github/
 *~
 
 # Archivos de sistema
@@ -73,6 +74,9 @@ desktop.ini
 .vscode/
 .idea/
 *.sublime-*
+
+# Lint caches
+.ruff_cache/
 
 # Archivos de configuración local
 .env
