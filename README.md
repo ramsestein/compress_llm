@@ -205,9 +205,11 @@ See `.github/workflows/ci.yml` for the full pipeline definition.
 
 ```
 compress_llm/
-├── compress_llm/             # Core package (CLI entry points, distillation)
-├── create_compress/          # Compression engine & configuration manager
-├── LoRa_train/               # PEFT fine-tuning engine
+├── src/                      # Source packages
+│   ├── compress_llm/         # Core package (CLI entry points, distillation)
+│   ├── create_compress/      # Compression engine & configuration manager
+│   ├── LoRa_train/           # PEFT fine-tuning engine
+│   └── down_report/          # Reporting utilities
 ├── scripts/                  # Standalone CLI utilities
 │   ├── apply_compression.py
 │   ├── finetune_peft.py

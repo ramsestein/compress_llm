@@ -21,7 +21,9 @@ import torch
 
 # Asegurar que el paquete del proyecto esté en el path de importación
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 # Import utilidades que realmente existen
 from create_compression_config import OptimizedCompressionConfigCreator

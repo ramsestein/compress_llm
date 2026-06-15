@@ -13,6 +13,7 @@ import pandas as pd
 
 # Agregar el directorio padre al path para importar módulos
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from LoRa_train.dataset_manager import DatasetConfig, OptimizedDatasetManager
 

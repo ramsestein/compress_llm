@@ -102,8 +102,8 @@ Repository = "https://github.com/ramsestein/compress_llm.git"
 Issues = "https://github.com/ramsestein/compress_llm/issues"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["create_compress*", "LoRa_train*", "compress_llm*", "down_report*", "tests*"]
+where = ["src"]
+include = ["create_compress*", "LoRa_train*", "compress_llm*", "down_report*"]
 exclude = ["*.tests", "*.tests.*", "tests.*", "test*"]
 
 [tool.pytest.ini_options]
@@ -111,10 +111,10 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--cov=create_compress --cov=LoRa_train --cov-report=term-missing --cov-report=html"
+addopts = "--cov=src/create_compress --cov=src/LoRa_train --cov-report=term-missing --cov-report=html"
 
 [tool.coverage.run]
-source = ["create_compress", "LoRa_train", "compress_llm"]
+source = ["src/create_compress", "src/LoRa_train", "src/compress_llm"]
 
 [tool.black]
 line-length = 100
@@ -128,9 +128,9 @@ target-version = "py38"
 select = ["E", "F", "W", "I", "N", "D", "UP", "B", "C4", "SIM"]
 ignore = ["E501", "D203", "D211", "D212", "D213"]
 per-file-ignores = {
-    "LoRa_train/**" = ["D100", "D102", "D103", "D105", "D107", "D205", "D401", "N806", "N812", "N999", "SIM102", "SIM115", "B019", "E741"],
-    "create_compress/**" = ["D100", "D102", "D103", "D105", "D107", "D205", "D401", "SIM102", "SIM115", "N806", "E741", "SIM116", "N812"],
-    "down_report/**" = ["D100", "D102", "D103", "D105", "D107", "D205", "D401", "SIM102", "SIM108", "N806"],
+    "src/LoRa_train/**" = ["D100", "D102", "D103", "D105", "D107", "D205", "D401", "N806", "N812", "N999", "SIM102", "SIM115", "B019", "E741"],
+    "src/create_compress/**" = ["D100", "D102", "D103", "D105", "D107", "D205", "D401", "SIM102", "SIM115", "N806", "E741", "SIM116", "N812"],
+    "src/down_report/**" = ["D100", "D102", "D103", "D105", "D107", "D205", "D401", "SIM102", "SIM108", "N806"],
     "scripts/**" = ["D100", "D102", "D103", "D105", "D107", "D205", "D401", "SIM102", "N806", "N803", "D101", "E741", "B007"],
     "tests/**" = ["D100", "D102", "D103", "D105", "D107", "D205", "D401", "N806", "SIM102", "SIM105", "SIM117", "B017", "B007"],
 }

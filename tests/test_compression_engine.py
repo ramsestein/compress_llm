@@ -7,7 +7,9 @@ import torch.nn as nn
 
 # Ensure the project package is on the import path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from apply_compression import save_pretrained_with_fallback
 from transformers import AutoModelForCausalLM, GPT2Config

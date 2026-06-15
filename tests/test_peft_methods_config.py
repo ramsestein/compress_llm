@@ -7,6 +7,7 @@ from pathlib import Path
 
 # Add the parent directory to the path to import LoRa_train modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from LoRa_train.peft_methods_config import (
     AdapterConfig,

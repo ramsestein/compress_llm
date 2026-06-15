@@ -20,6 +20,7 @@ if (_script_dir / "create_compress").exists():
     sys.path.insert(0, str(_script_dir))
 else:
     sys.path.insert(0, str(_script_dir.parent))
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 import torch
 import torch.nn as nn
